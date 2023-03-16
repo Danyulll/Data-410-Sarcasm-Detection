@@ -1,0 +1,68 @@
+---
+title: "Data Set Prep"
+author: "Daniel Krasnov"
+date: "2023-03-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r loading in data}
+# Loading in data
+AmItheAsshole <- read.csv("../data/AmItheAsshole.csv")
+askreddit <- read.csv("../data/askreddit.csv")
+food <- read.csv("../data/food.csv")
+funny <- read.csv("../data/funny.csv")
+gaming <- read.csv("../data/gaming.csv")
+interestingasfuck <- read.csv("../data/interestingasfuck.csv")
+news <- read.csv("../data/news.csv")
+todayilearned <- read.csv("../data/todayilearned.csv")
+
+datasets <- list(AmItheAsshole, askreddit, food, funny, gaming, interestingasfuck, news, todayilearned)
+```
+
+```{r subset dataframe list}
+sarcastic <- do.call(rbind,lapply(datasets, subset, Sarcastic==1))
+non_sarcastic <- do.call(rbind,lapply(datasets, subset, Sarcastic==0))
+```
+
+```{r DGP raw data}
+library(dplyr)
+
+# Generate datasets with differnet ratios of sarcastic:normal
+
+# 1:2
+data_1to2 <- rbind(sample_n(non_sarcastic,164),sarcastic)
+
+# 1:3
+data_1to3 <- rbind(sample_n(non_sarcastic,328),sarcastic)
+
+# 1:5 
+data_1to5 <- rbind(sample_n(non_sarcastic,656),sarcastic)
+
+# 1:10 
+data_1to10 <- rbind(sample_n(non_sarcastic,1476),sarcastic)
+
+```
+
+```{r removing /s tag}
+data_1to2$Body <- gsub("/s$", "", data_1to2$Body)
+
+data_1to3$Body <- gsub("/s$", "", data_1to3$Body)
+
+data_1to5$Body <- gsub("/s$", "", data_1to5$Body)
+
+data_1to10$Body <- gsub("/s$", "", data_1to10$Body)
+
+```
+
+```{r saving output}
+write.csv(data_1to2, "data_1to2.csv", row.names = FALSE)
+write.csv(data_1to3, "data_1to3.csv", row.names = FALSE)
+write.csv(data_1to5, "data_1to5.csv", row.names = FALSE)
+write.csv(data_1to10, "data_1to10.csv", row.names = FALSE)
+```
+
