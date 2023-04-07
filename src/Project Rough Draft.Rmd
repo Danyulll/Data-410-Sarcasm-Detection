@@ -1,0 +1,78 @@
+---
+title: "Data 410 Project Rough Draft"
+author: "Daniel Krasnov, Keiran Malott, Ross Cooper"
+date: "2023-04-07"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+  html_document:
+    toc: yes
+    toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+\newpage
+
+# Guidelines
+- An introduction to the dataset, and the scientific hypotheses you will investigate.
+
+- A descriptive analysis of the data; give a detailed description about the data including
+the number of variables, variables types, summary statistics, graphs of data, etc..
+
+– A regression analysis that addresses your scientific hypothesis, using all the regression
+model building techniques you have learned. Model and data appropriateness
+diagnostics are expected. Plots and tables are highly encouraged, where you need to
+include the interpretation for each plot/table.
+
+– Conclusions and recommendations: give your conclusion based on your regression
+analysis such as important variables identified, the most proper regression model you
+have discovered, how your regression assumptions may be violated and how they affect
+your results, etc
+
+# Data Collection Method
+describe how we scappred Not How Girls Work Subreddit
+
+```{r Loading in data}
+data <- read.csv("../data/NHGW.csv")
+data <- data[,2:3]
+head(data)
+```
+
+## Variable Description
+
+Show example of our full data set show
+
+## Data Preprocessing
+
+Explain we only used Sarcastic and body columns. We used regex to remove /s. We then remove stopwords, lemmatize, etc.
+
+# Feature Extraction Methods
+interpreting text as data is lots of work say something about why that's tough and we need ways to vectorize text.
+
+## TF-IDF
+
+Explain tf-idf. Show what final result is for design matrix and explain how you got there.
+
+## Word2Vec
+
+Explain word2vec. Show what final result is for design matrix and explain how you got there.
+
+## Glove
+
+Explain Glove. Show what final result is for design matrix and explain how you got there.
+
+# Regression Analysis
+This analysis is a comparison of logistic model performance when using 3 types of feature extraction.
+
+## Daniel's Analysis (better title later)
+
+
+
+## Keiran's Analysis (better title later)
+
+## Ross' Analysis (better title later)
+
