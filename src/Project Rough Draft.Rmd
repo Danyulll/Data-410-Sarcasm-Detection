@@ -26,6 +26,7 @@ library(plm)
 library(reshape2)
 library(tidyverse)
 library(glmnet)
+library(ggplot2)
 ```
 \newpage
 
@@ -287,7 +288,7 @@ Pr_PCA_train <- Precision(y_true, y_pred, positive = 1)
 F1_PCA_train <- F1_Score(y_true, y_pred, positive = 1)
 ```
 
-```{r Test Metrics for Base, warning=FALSE}
+```{r Test Metrics for PCA, warning=FALSE}
 # Get predictions
 predict.out <- predict(glm.out, newdata = test_data ,type="response")
 predict.out[which(predict.out >= 0.5)] <- 1
@@ -316,7 +317,7 @@ VIFs_PCA <- vif(glm.out)
 ### LASSO
 ```{r Fit LASSO}
 # Construct dataframe for fitting
-x <- as.data.frame(as.matrix(tfidf_dtm_r))
+x <- as.data.frame(as.matrix(tfidf_dtm[train_idx,]))
 y_train <- y[train_idx]
 data <- cbind(y_train,x)
 test_data <- cbind(as.data.frame(as.matrix(tfidf_dtm[test_idx,])))
@@ -369,8 +370,445 @@ F1_LASSO_test <- F1_Score(y_true, y_pred, positive = 1)
 ```
 
 ### Weighted Base Model
+
+```{r Get results for weighted base model, warning=FALSE}
+# Recreate DTM
+tfidf_dtm_r <- tfidf_dtm[train_idx, tfidf_dtm$v > thresh]
+
+# Construct dataframe for fitting
+x <- as.data.frame(as.matrix(tfidf_dtm_r))
+y_train <- y[train_idx]
+data <- cbind(y_train, x)
+test_data <- cbind(as.data.frame(as.matrix(tfidf_dtm[test_idx, ])))
+results_base_weighted <-
+  data.frame(Re = NA,
+             Pr = NA,
+             F1 = NA,
+             w1 = NA)
+
+# For each weight calculate metrics
+for (w1 in seq(0, 1, 0.01)) {
+  weights <- c()
+  # w1 = 0.01
+  w2 = 1 - w1
+  
+  for (i in 1:length(y_train)) {
+    if (y_train[i] == 1) {
+      weights <- c(weights, w1)
+    } else{
+      weights <- c(weights, w2)
+    }
+  }
+  
+  # Fit model
+  glm.out <-
+    glm(y_train ~ .,
+        family = binomial,
+        data = data,
+        weights = weights)
+  
+  # Get results
+  predict.out <-
+    predict(glm.out, newdata = test_data , type = "response")
+  predict.out[which(predict.out >= 0.5)] <- 1
+  predict.out[which(predict.out < 0.5)] <- 0
+  guess <- data.frame(predict.out)
+  output <- cbind(guess, y[test_idx])
+  colnames(output)[2] <- "truth"
+  y_true <- output$truth
+  y_pred <- output$predict.out
+  
+  # Get metrics
+  Re <- Recall(y_true, y_pred, positive = 1)
+  Pr <- Precision(y_true, y_pred, positive = 1)
+  F1 <- F1_Score(y_true, y_pred, positive = 1)
+  
+  results_base_weighted <-
+    rbind(results_base_weighted, data.frame(
+      Re = Re,
+      Pr = Pr,
+      F1 = F1,
+      w1 = w1
+    ))
+}
+results_base_weighted <- na.omit(results_base_weighted)
+```
+
+```{r Visualize results_base_weighted}
+# Reshape data 
+results_long <- melt(results_base_weighted, id.vars = "w1", 
+                     variable.name = "y_var", value.name = "value")
+
+# Visualize
+ggplot(results_long, aes(x = w1, y = value, color = y_var)) +
+  geom_point()
+```
+We want a F1 that balances Recall and Precision but still focuses on Recall. Anything around 0.75 is good.
+
+```{r Fit optimal base weighting, warning=FALSE}
+# Fit model
+w1 = 0.75
+w2 = 1 - w1
+weights <- c()
+
+for (i in 1:length(y_train)) {
+  if (y_train[i] == 1) {
+    weights <- c(weights, w1)
+  } else{
+    weights <- c(weights, w2)
+  }
+}
+
+# Fit model
+glm.out <-
+  glm(y_train ~ .,
+      family = binomial,
+      data = data,
+      weights = weights)
+
+# Percent reduction in deviance
+per_dev_red_base_weighted <- 1 - glm.out$deviance/glm.out$null.deviance
+```
+
+
+```{r Test Metrics for Base Weighted, warning=FALSE}
+# Get predictions
+test_data <- cbind(as.data.frame(as.matrix(tfidf_dtm[test_idx, ])))
+predict.out <-
+  predict(glm.out, newdata = test_data , type = "response")
+predict.out[which(predict.out >= 0.5)] <- 1
+predict.out[which(predict.out < 0.5)] <- 0
+guess <- data.frame(predict.out)
+
+# Format output
+output <- cbind(guess, y[test_idx])
+colnames(output)[2] <- "truth"
+y_true <- output$truth
+y_pred <- output$predict.out
+
+# Get metrics
+Re_base_weighted_test <- Recall(y_true, y_pred, positive = 1)
+Pr_base_weighted_test <- Precision(y_true, y_pred, positive = 1)
+F1_base_weighted_test <- F1_Score(y_true, y_pred, positive = 1)
+```
+
+```{r VIFs Base Weighted Model, warning=FALSE}
+# Cannot use VIF if there are NAs, remove them
+dropterms <-
+  names(glm.out$coefficients[is.na(glm.out$coefficients)])
+x <- x[, which(!(colnames(x) %in% dropterms))]
+data <- cbind(y_train, x)
+glm.out <- glm(y_train ~ ., family = binomial, data)
+
+# 5 VIFs over 10
+VIFs_weighted_base <- vif(glm.out) 
+```
+
 ### Weighted PCA
+
+```{r Get results for weighted PCA model, warning=FALSE}
+# Recreate DTM
+tfidf_dtm_r <- tfidf_dtm[train_idx, tfidf_dtm$v > thresh]
+
+pca.out <- prcomp(as.data.frame(as.matrix(tfidf_dtm_r)))
+pca.out.test <- predict(pca.out, as.data.frame(as.matrix(tfidf_dtm[test_idx,])))
+
+# 90th cumulative proportion is given by PC1:PC24
+pcs <- as.data.frame(pca.out$x[,1:24])
+train_data <- cbind(y_train,pcs)
+test_data <- as.data.frame(pca.out.test[,1:24])
+
+# Create results dataframe
+results_weighted_pca <-
+  data.frame(Re = NA,
+             Pr = NA,
+             F1 = NA,
+             w1 = NA)
+
+# For each weight calculate metrics
+for (w1 in seq(0, 1, 0.01)) {
+  weights <- c()
+  # w1 = 0.01
+  w2 = 1 - w1
+  
+  for (i in 1:length(y_train)) {
+    if (y_train[i] == 1) {
+      weights <- c(weights, w1)
+    } else{
+      weights <- c(weights, w2)
+    }
+  }
+  
+  # Fit model
+  glm.out <-
+    glm(y_train ~ .,
+        family = binomial,
+        data = train_data,
+        weights = weights)
+  
+  # Get results
+  predict.out <-
+    predict(glm.out, newdata = test_data , type = "response")
+  predict.out[which(predict.out >= 0.5)] <- 1
+  predict.out[which(predict.out < 0.5)] <- 0
+  guess <- data.frame(predict.out)
+  output <- cbind(guess, y[test_idx])
+  colnames(output)[2] <- "truth"
+  y_true <- output$truth
+  y_pred <- output$predict.out
+  
+  # Get metrics
+  Re <- Recall(y_true, y_pred, positive = 1)
+  Pr <- Precision(y_true, y_pred, positive = 1)
+  F1 <- F1_Score(y_true, y_pred, positive = 1)
+  
+  results_weighted_pca <-
+    rbind(results_weighted_pca, data.frame(
+      Re = Re,
+      Pr = Pr,
+      F1 = F1,
+      w1 = w1
+    ))
+}
+results_weighted_pca <- na.omit(results_weighted_pca)
+```
+
+```{r Visualize results_base_weighted}
+# Reshape data 
+results_long <- melt(results_weighted_pca, id.vars = "w1", 
+                     variable.name = "y_var", value.name = "value")
+
+# Visualize
+ggplot(results_long, aes(x = w1, y = value, color = y_var)) +
+  geom_point() 
+```
+F1 holds pretty steady. We go for the one that has the highest Recall, a reasonable precision, and w good F1. 0.62 has 
+
+```{r Fit optimal PCA weighting, warning=FALSE}
+# Fit model
+w1 = 0.62
+w2 = 1 - w1
+weights <- c()
+
+for (i in 1:length(y_train)) {
+  if (y_train[i] == 1) {
+    weights <- c(weights, w1)
+  } else{
+    weights <- c(weights, w2)
+  }
+}
+
+# Fit model
+glm.out <-
+  glm(y_train ~ .,
+      family = binomial,
+      data = train_data,
+      weights = weights)
+
+# Percent reduction in deviance
+per_dev_red_PCA <- glm.out$deviance/glm.out$null.deviance # note this is actually an increase by a factor of 19.96864
+```
+
+```{r Train Metrics for Weighted PCA}
+# Get predictions
+predict.out <- predict(glm.out, type = "response")
+predict.out[which(predict.out >= 0.5)] <- 1
+predict.out[which(predict.out < 0.5)] <- 0
+guess <- data.frame(predict.out)
+
+# Format output
+output <- cbind(guess, y[train_idx])
+colnames(output)[2] <- "truth"
+y_true <- output$truth
+y_pred <- output$predict.out
+
+# Get metrics
+Re_weighted_PCA_train <- Recall(y_true, y_pred, positive = 1)
+Pr_weighted_PCA_train <- Precision(y_true, y_pred, positive = 1)
+F1_weighted_PCA_train <- F1_Score(y_true, y_pred, positive = 1)
+```
+
+```{r Test Metrics for Weighted PCA, warning=FALSE}
+# Get predictions
+predict.out <- predict(glm.out, newdata = test_data ,type="response")
+predict.out[which(predict.out >= 0.5)] <- 1
+predict.out[which(predict.out < 0.5)] <- 0
+guess <- data.frame(predict.out)
+
+# Format output
+output <- cbind(guess,y[test_idx])
+colnames(output)[2] <- "truth"
+y_true <- output$truth
+y_pred <- output$predict.out
+
+# Get metrics
+Re_weighted_PCA_test <- Recall(y_true, y_pred, positive = 1)
+Pr_weighted_PCA_test <- Precision(y_true, y_pred, positive = 1)
+F1_weighted_PCA_test <- F1_Score(y_true, y_pred, positive = 1)
+```
+
+```{r VIFs Weighted PCA Model, warning=FALSE}
+# All 1
+VIFs_weighted_PCA <- vif(glm.out) # none over 10
+```
+
 ### Weighted LASSO
+
+```{r refit best LASSO}
+# Construct dataframe for fitting
+x <- as.data.frame(as.matrix(tfidf_dtm[train_idx,]))
+y_train <- y[train_idx]
+data <- cbind(y_train,x)
+test_data <- cbind(as.data.frame(as.matrix(tfidf_dtm[test_idx,])))
+
+# Fit best found model
+glmnet.out <- glmnet(as.matrix(x),y_train,family="binomial",alpha = 1,lambda = best_lambda)
+```
+
+```{r Get results for weighted LASSO model, warning=FALSE}
+# Construct dataframe for fitting
+x <- as.data.frame(as.matrix(tfidf_dtm[train_idx, ]))
+y_train <- y[train_idx]
+data <- cbind(y_train, x)
+test_data <- as.matrix(tfidf_dtm[test_idx, ])
+
+# Create results dataframe
+results_weighted_lasso <-
+  data.frame(Re = NA,
+             Pr = NA,
+             F1 = NA,
+             w1 = NA)
+
+# For each weight calculate metrics
+for (w1 in seq(0.01, 0.99, 0.01)) {
+  weights <- c()
+  # w1 = 0.1
+  w2 = 1 - w1
+  
+  for (i in 1:length(y_train)) {
+    if (y_train[i] == 1) {
+      weights <- c(weights, w1)
+    } else{
+      weights <- c(weights, w2)
+    }
+  }
+  
+  # Fit model
+  glmnet.out <-
+    glmnet(
+      as.matrix(x),
+      y_train,
+      family = "binomial",
+      alpha = 1,
+      lambda = best_lambda,
+      weights = weights
+    )
+  
+  # Get results
+  predict.out <-
+    predict(glmnet.out, newx = test_data , type = "response")
+  predict.out[which(predict.out >= 0.5)] <- 1
+  predict.out[which(predict.out < 0.5)] <- 0
+  guess <- data.frame(predict.out)
+  output <- cbind(guess, y[test_idx])
+  colnames(output)[2] <- "truth"
+  y_true <- output$truth
+  y_pred <- output$s0
+  
+  # Get metrics
+  Re <- Recall(y_true, y_pred, positive = 1)
+  Pr <- Precision(y_true, y_pred, positive = 1)
+  F1 <- F1_Score(y_true, y_pred, positive = 1)
+  
+  results_weighted_lasso <-
+    rbind(results_weighted_lasso, data.frame(
+      Re = Re,
+      Pr = Pr,
+      F1 = F1,
+      w1 = w1
+    ))
+}
+results_weighted_lasso <- na.omit(results_weighted_lasso)
+```
+
+```{r Visualize results_weighted_lasso}
+# Reshape data 
+results_long <- melt(results_weighted_lasso, id.vars = "w1", 
+                     variable.name = "y_var", value.name = "value")
+
+# Visualize
+ggplot(results_long, aes(x = w1, y = value, color = y_var)) +
+  geom_point() 
+```
+0.55 is best
+
+```{r Fit optimal PCA weighting, warning=FALSE}
+# Fit model
+w1 = 0.55
+w2 = 1 - w1
+weights <- c()
+
+for (i in 1:length(y_train)) {
+  if (y_train[i] == 1) {
+    weights <- c(weights, w1)
+  } else{
+    weights <- c(weights, w2)
+  }
+}
+
+ # Fit model
+  glmnet.out <-
+    glmnet(
+      as.matrix(x),
+      y_train,
+      family = "binomial",
+      alpha = 1,
+      lambda = best_lambda,
+      weights = weights
+    )
+  
+# Percent reduction in deviance
+per_dev_red_weighted_Lasso <- glmnet.out$dev.ratio
+```
+
+```{r Train Metrics for Weighted PCA}
+# Get predictions
+predict.out <- predict(glm.out, type = "response")
+predict.out[which(predict.out >= 0.5)] <- 1
+predict.out[which(predict.out < 0.5)] <- 0
+guess <- data.frame(predict.out)
+
+# Format output
+output <- cbind(guess, y[train_idx])
+colnames(output)[2] <- "truth"
+y_true <- output$truth
+y_pred <- output$predict.out
+
+# Get metrics
+Re_weighted_PCA_train <- Recall(y_true, y_pred, positive = 1)
+Pr_weighted_PCA_train <- Precision(y_true, y_pred, positive = 1)
+F1_weighted_PCA_train <- F1_Score(y_true, y_pred, positive = 1)
+```
+
+```{r Test Metrics for Weighted PCA, warning=FALSE}
+# Get predictions
+predict.out <- predict(glm.out, newdata = test_data ,type="response")
+predict.out[which(predict.out >= 0.5)] <- 1
+predict.out[which(predict.out < 0.5)] <- 0
+guess <- data.frame(predict.out)
+
+# Format output
+output <- cbind(guess,y[test_idx])
+colnames(output)[2] <- "truth"
+y_true <- output$truth
+y_pred <- output$predict.out
+
+# Get metrics
+Re_weighted_PCA_test <- Recall(y_true, y_pred, positive = 1)
+Pr_weighted_PCA_test <- Precision(y_true, y_pred, positive = 1)
+F1_weighted_PCA_test <- F1_Score(y_true, y_pred, positive = 1)
+```
+
 
 ## Keiran's Analysis (better title later)
 
