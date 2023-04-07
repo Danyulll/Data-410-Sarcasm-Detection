@@ -15,9 +15,22 @@ output:
 knitr::opts_chunk$set(echo = FALSE)
 ```
 
+```{r Libraries, include=FALSE}
+# Loading libraries
+library(tm)
+library(MLmetrics)
+library(glmnet)
+library(qdapRegex)
+library(car)
+library(plm)
+library(reshape2)
+library(tidyverse)
+library(glmnet)
+```
 \newpage
 
 # Guidelines
+
 - An introduction to the dataset, and the scientific hypotheses you will investigate.
 
 - A descriptive analysis of the data; give a detailed description about the data including
@@ -37,9 +50,9 @@ your results, etc
 describe how we scappred Not How Girls Work Subreddit
 
 ```{r Loading in data}
+# Load in data
 data <- read.csv("../data/NHGW.csv")
 data <- data[,2:3]
-head(data)
 ```
 
 ## Variable Description
@@ -57,6 +70,45 @@ interpreting text as data is lots of work say something about why that's tough a
 
 Explain tf-idf. Show what final result is for design matrix and explain how you got there.
 
+```{r Create Corpus}
+y <- data$Sarcastic
+doc_id <- 1:nrow(data)
+data$doc_id <- doc_id
+data_clean <- data[,c("Body","doc_id")]
+colnames(data_clean)[1] <- "text"
+data_clean$text <- rm_non_words(data_clean$text)
+
+# Construct Corpus
+ds <- DataframeSource(data_clean)
+corpus <- Corpus(ds)
+```
+
+```{r Clean Corpus}
+# Clean the Corpus
+# Remove punctuation
+corpus <- tm_map(corpus, content_transformer(removePunctuation))
+# Send everything to lower case
+corpus <- tm_map(corpus, content_transformer(tolower))
+# Remove stopwords
+corpus <- tm_map(corpus, content_transformer(removeWords), 
+          stopwords("english"))
+# Remove whitespace
+corpus <- tm_map(corpus, stripWhitespace)
+# Remove numbers
+corpus <- tm_map(corpus, content_transformer(removeNumbers))
+# Stemming
+corpus <- tm_map(corpus, stemDocument)
+```
+
+```{r Create TF-IDF DTM}
+# Create DTM object
+dtm <- DocumentTermMatrix(corpus)
+# Weight TF-IDF
+tfidf_dtm <- weightTfIdf(dtm)
+```
+
+
+
 ## Word2Vec
 
 Explain word2vec. Show what final result is for design matrix and explain how you got there.
@@ -65,12 +117,260 @@ Explain word2vec. Show what final result is for design matrix and explain how yo
 
 Explain Glove. Show what final result is for design matrix and explain how you got there.
 
+# Evaluation Metrics
+
+Describe Precision, Recall, F1.
+
 # Regression Analysis
 This analysis is a comparison of logistic model performance when using 3 types of feature extraction.
 
 ## Daniel's Analysis (better title later)
 
+### Base Model
+The dimension of the DTM is too large by default. Can't use bestGLM as too many predictors. Do form of best subset by checking quantities of TF-IDF.
 
+```{r Creating Quantile List}
+# Set seed
+set.seed(874)
+
+# Do 80/20 train/test split
+train_idx <- sample(1:nrow(data),floor(.8*(nrow(data))))
+test_idx <- setdiff(1:nrow(data),train_idx)
+
+# Get quantiles
+tfidf_mat <- as.matrix(tfidf_dtm[train_idx,])
+
+tfidf_vec <- as.vector(tfidf_mat)
+
+tfidf_vec <- tfidf_vec[tfidf_vec > 0]
+
+quants <- quantile(tfidf_vec, probs = seq(0.1,0.95,0.05))
+
+# Only keep quantiles that result in matrices with fewer columns than rows
+cols <- c()
+for (quant in quants) {
+  cols <- c(cols, ncol(tfidf_dtm[train_idx,tfidf_dtm$v > quant]))
+}
+
+ numRows <- nrow(tfidf_dtm[train_idx,])
+ quants <- quants[which(cols < numRows)]
+```
+
+```{r Perform Best Subset Regression, cache=TRUE, message=FALSE,warning=FALSE}
+# Get AICs for different subsets
+models_aic <- list()
+for (quant in quants) {
+  # Filter DTM
+  tfidf_dtm_r <- tfidf_dtm[train_idx, tfidf_dtm$v > quant]
+  
+  # Construct dataframe for fitting
+  x <- as.data.frame(as.matrix(tfidf_dtm_r))
+  y_train <- y[train_idx]
+  data <- cbind(y_train, x)
+  
+  # Fit model
+  glm.out <- glm(y_train ~ ., family = binomial, data)
+  models_aic <- append(models_aic, glm.out$aic)
+}
+
+# Get best quantitle threshold by AIC
+thresh <- quants[which.min(models_aic)]
+```
+The 95% percentile gave the best AIC so this is the base model I will select.
+
+```{r Fit 95th Percentile Mode, warning=FALSE}
+# Filter DTM
+tfidf_dtm_r <- tfidf_dtm[train_idx,tfidf_dtm$v > thresh  ]
+
+# Construct dataframe for fitting
+x <- as.data.frame(as.matrix(tfidf_dtm_r))
+y_train <- y[train_idx]
+data <- cbind(y_train,x)
+
+# Fit model
+glm.out <- glm(y_train~., family = binomial, data)
+
+# Percent reduction in deviance
+per_dev_red_base <- 1 - glm.out$deviance/glm.out$null.deviance
+```
+
+There are several NAs, not good. Let's get results.
+
+```{r Train Metrics for Base}
+# Get predictions
+predict.out <- predict(glm.out, type = "response")
+predict.out[which(predict.out >= 0.5)] <- 1
+predict.out[which(predict.out < 0.5)] <- 0
+guess <- data.frame(predict.out)
+
+# Format output
+output <- cbind(guess, y[train_idx])
+colnames(output)[2] <- "truth"
+y_true <- output$truth
+y_pred <- output$predict.out
+
+# Get metrics
+Re_base_train <- Recall(y_true, y_pred, positive = 1)
+Pr_base_train <- Precision(y_true, y_pred, positive = 1)
+F1_base_train <- F1_Score(y_true, y_pred, positive = 1)
+```
+
+```{r Test Metrics for Base, warning=FALSE}
+# Get predictions
+test_data <- cbind(as.data.frame(as.matrix(tfidf_dtm[test_idx,])))
+predict.out <- predict(glm.out, newdata = test_data ,type="response")
+predict.out[which(predict.out >= 0.5)] <- 1
+predict.out[which(predict.out < 0.5)] <- 0
+guess <- data.frame(predict.out)
+
+# Format output
+output <- cbind(guess,y[test_idx])
+colnames(output)[2] <- "truth"
+y_true <- output$truth
+y_pred <- output$predict.out
+
+# Get metrics
+Re_base_test <- Recall(y_true, y_pred, positive = 1)
+Pr_base_test <- Precision(y_true, y_pred, positive = 1)
+F1_base_test <- F1_Score(y_true, y_pred, positive = 1)
+```
+
+```{r VIFs Base Model, warning=FALSE}
+# Cannot use VIF if there are NAs, remove them
+dropterms <-
+  names(glm.out$coefficients[is.na(glm.out$coefficients)])
+x <- x[, which(!(colnames(x) %in% dropterms))]
+data <- cbind(y_train, x)
+glm.out <- glm(y_train ~ ., family = binomial, data)
+
+# 6 VIFs over 10 serious collinearity problems
+VIFs_base <- vif(glm.out) 
+```
+High VIFs, bad need to reduce collineairty. We try PCA now.
+
+### PCA
+
+We keep up to 90th percentile
+
+```{r Perform PCA, warning=FALSE}
+pca.out <- prcomp(as.data.frame(as.matrix(tfidf_dtm_r)))
+pca.out.test <- predict(pca.out, as.data.frame(as.matrix(tfidf_dtm[test_idx,])))
+
+# 90th cumulative proportion is given by PC1:PC16
+pcs <- as.data.frame(pca.out$x[,1:16])
+train_data <- cbind(y_train,pcs)
+test_data <- as.data.frame(pca.out.test[,1:16])
+
+# Fit model
+glm.out <- glm(y_train~., family = binomial, train_data)
+
+# Percent reduction in deviance
+per_dev_red_PCA <- glm.out$deviance/glm.out$null.deviance # note this is actually an increase by a factor of 25.17876
+```
+
+```{r Train Metrics for PCA}
+# Get predictions
+predict.out <- predict(glm.out, type = "response")
+predict.out[which(predict.out >= 0.5)] <- 1
+predict.out[which(predict.out < 0.5)] <- 0
+guess <- data.frame(predict.out)
+
+# Format output
+output <- cbind(guess, y[train_idx])
+colnames(output)[2] <- "truth"
+y_true <- output$truth
+y_pred <- output$predict.out
+
+# Get metrics
+Re_PCA_train <- Recall(y_true, y_pred, positive = 1)
+Pr_PCA_train <- Precision(y_true, y_pred, positive = 1)
+F1_PCA_train <- F1_Score(y_true, y_pred, positive = 1)
+```
+
+```{r Test Metrics for Base, warning=FALSE}
+# Get predictions
+predict.out <- predict(glm.out, newdata = test_data ,type="response")
+predict.out[which(predict.out >= 0.5)] <- 1
+predict.out[which(predict.out < 0.5)] <- 0
+guess <- data.frame(predict.out)
+
+# Format output
+output <- cbind(guess,y[test_idx])
+colnames(output)[2] <- "truth"
+y_true <- output$truth
+y_pred <- output$predict.out
+
+# Get metrics
+Re_PCA_test <- Recall(y_true, y_pred, positive = 1)
+Pr_PCA_test <- Precision(y_true, y_pred, positive = 1)
+F1_PCA_test <- F1_Score(y_true, y_pred, positive = 1)
+```
+
+Very not good predicts everything as not sar.
+
+```{r VIFs PCA Model, warning=FALSE}
+# All 1
+VIFs_PCA <- vif(glm.out) 
+```
+
+### LASSO
+```{r Fit LASSO}
+# Construct dataframe for fitting
+x <- as.data.frame(as.matrix(tfidf_dtm_r))
+y_train <- y[train_idx]
+data <- cbind(y_train,x)
+test_data <- cbind(as.data.frame(as.matrix(tfidf_dtm[test_idx,])))
+
+# Perform CV
+glmnet.cv.out <- cv.glmnet(as.matrix(x),y_train,family="binomial",alpha = 1)
+best_lambda <- glmnet.cv.out$lambda.min
+
+# Fit best found model
+glmnet.out <- glmnet(as.matrix(x),y_train,family="binomial",alpha = 1,lambda = best_lambda)
+```
+
+```{r Train Metrics for LASSO, warning=FALSE}
+# Get predictions
+predict.out <- predict(glmnet.out, as.matrix(x),type = "response")
+predict.out[which(predict.out >= 0.5)] <- 1
+predict.out[which(predict.out < 0.5)] <- 0
+guess <- data.frame(predict.out)
+
+# Format output
+output <- cbind(guess, y[train_idx])
+colnames(output)[2] <- "truth"
+y_true <- output$truth
+y_pred <- output$s0
+
+# Get metrics
+Re_LASSO_train <- Recall(y_true, y_pred, positive = 1)
+Pr_LASSO_train <- Precision(y_true, y_pred, positive = 1)
+F1_LASSO_train <- F1_Score(y_true, y_pred, positive = 1)
+```
+
+```{r Test Metrics for LASSO, warning=FALSE}
+# Get predictions
+test_data <- as.matrix(tfidf_dtm[test_idx,rownames(glmnet.out$beta)])
+predict.out <- predict(glmnet.out,newx = test_data,type="response")
+predict.out[which(predict.out >= 0.5)] <- 1
+predict.out[which(predict.out < 0.5)] <- 0
+guess <- data.frame(predict.out)
+
+# Format output
+output <- cbind(guess, y[test_idx])
+colnames(output)[2] <- "truth"
+y_true <- output$truth
+y_pred <- output$s0
+
+# Get metrics
+Re_LASSO_test <- Recall(y_true, y_pred, positive = 1)
+Pr_LASSO_test <- Precision(y_true, y_pred, positive = 1)
+F1_LASSO_test <- F1_Score(y_true, y_pred, positive = 1)
+```
+
+### Weighted Base Model
+### Weighted PCA
+### Weighted LASSO
 
 ## Keiran's Analysis (better title later)
 
