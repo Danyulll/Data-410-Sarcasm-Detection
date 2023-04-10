@@ -12,7 +12,7 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(echo = FALSE,cache = TRUE)
 ```
 
 ```{r Libraries, include=FALSE}
@@ -36,25 +36,9 @@ conflicts_prefer(MLmetrics::Recall)
 ```
 \newpage
 
-# Guidelines
 
-- An introduction to the dataset, and the scientific hypotheses you will investigate.
 
-- A descriptive analysis of the data; give a detailed description about the data including
-the number of variables, variables types, summary statistics, graphs of data, etc..
 
-– A regression analysis that addresses your scientific hypothesis, using all the regression
-model building techniques you have learned. Model and data appropriateness
-diagnostics are expected. Plots and tables are highly encouraged, where you need to
-include the interpretation for each plot/table.
-
-– Conclusions and recommendations: give your conclusion based on your regression
-analysis such as important variables identified, the most proper regression model you
-have discovered, how your regression assumptions may be violated and how they affect
-your results, etc
-
-# Data Collection Method
-describe how we scappred Not How Girls Work Subreddit
 
 ```{r Loading in data}
 # Load in data
@@ -62,20 +46,7 @@ data <- read.csv("../data/NHGW.csv")
 data <- data[,2:3]
 ```
 
-## Variable Description
 
-Show example of our full data set show
-
-## Data Preprocessing
-
-Explain we only used Sarcastic and body columns. We used regex to remove /s. We then remove stopwords, lemmatize, etc.
-
-# Feature Extraction Methods
-interpreting text as data is lots of work say something about why that's tough and we need ways to vectorize text.
-
-## TF-IDF
-
-Explain tf-idf. Show what final result is for design matrix and explain how you got there.
 
 ```{r Create Corpus}
 y <- data$Sarcastic
@@ -116,20 +87,9 @@ tfidf_dtm <- weightTfIdf(dtm)
 
 
 
-## Word2Vec
 
-Explain word2vec. Show what final result is for design matrix and explain how you got there.
 
-## Glove
 
-Explain Glove. Show what final result is for design matrix and explain how you got there.
-
-# Evaluation Metrics
-
-Describe Precision, Recall, F1.
-
-# Regression Analysis
-This analysis is a comparison of logistic model performance when using 3 types of feature extraction.
 
 ## Daniel's Analysis (better title later)
 
@@ -779,7 +739,7 @@ per_dev_red_weighted_Lasso <- glmnet.out$dev.ratio
 
 ```{r Train Metrics for Weighted LASSO}
 # Get predictions
-predict.out <- predict(glm.out, type = "response")
+predict.out <- predict(glmnet.out,newx = as.matrix(x), type = "response")
 predict.out[which(predict.out >= 0.5)] <- 1
 predict.out[which(predict.out < 0.5)] <- 0
 guess <- data.frame(predict.out)
@@ -788,17 +748,17 @@ guess <- data.frame(predict.out)
 output <- cbind(guess, y[train_idx])
 colnames(output)[2] <- "truth"
 y_true <- output$truth
-y_pred <- output$predict.out
+y_pred <- output$s0
 
 # Get metrics
-Re_weighted_PCA_train <- Recall(y_true, y_pred, positive = 1)
-Pr_weighted_PCA_train <- Precision(y_true, y_pred, positive = 1)
-F1_weighted_PCA_train <- F1_Score(y_true, y_pred, positive = 1)
+Re_weighted_LASSO_train <- Recall(y_true, y_pred, positive = 1)
+Pr_weighted_LASSO_train <- Precision(y_true, y_pred, positive = 1)
+F1_weighted_LASSO_train <- F1_Score(y_true, y_pred, positive = 1)
 ```
 
 ```{r Test Metrics for Weighted LASSO, warning=FALSE}
 # Get predictions
-predict.out <- predict(glm.out, newdata = as.data.frame(test_data) ,type="response")
+predict.out <- predict(glmnet.out, newx = test_data ,type="response")
 predict.out[which(predict.out >= 0.5)] <- 1
 predict.out[which(predict.out < 0.5)] <- 0
 guess <- data.frame(predict.out)
@@ -807,12 +767,12 @@ guess <- data.frame(predict.out)
 output <- cbind(guess,y[test_idx])
 colnames(output)[2] <- "truth"
 y_true <- output$truth
-y_pred <- output$predict.out
+y_pred <- output$s0
 
 # Get metrics
-Re_weighted_PCA_test <- Recall(y_true, y_pred, positive = 1)
-Pr_weighted_PCA_test <- Precision(y_true, y_pred, positive = 1)
-F1_weighted_PCA_test <- F1_Score(y_true, y_pred, positive = 1)
+Re_weighted_LASSO_test <- Recall(y_true, y_pred, positive = 1)
+Pr_weighted_LASSO_test <- Precision(y_true, y_pred, positive = 1)
+F1_weighted_LASSO_test <- F1_Score(y_true, y_pred, positive = 1)
 ```
 
 
@@ -895,9 +855,9 @@ reddit_data = na.omit(reddit_data)
   # use window of 5 for context words
   tcm <- create_tcm(it, vectorizer, skip_grams_window = 5L)
   
-for(i in 1:200){
+#for(i in 1:200){
   # fitting the GLOVE model
-  glove = GlobalVectors$new(rank = i, x_max = 10)
+  glove = GlobalVectors$new(rank = 140, x_max = 10)
   wv_main = glove$fit_transform(tcm, n_iter = 10, convergence_tol = 0.01, n_threads = 8)
   
   # creating word vectors
@@ -923,7 +883,7 @@ for(i in 1:200){
   #append values
   aic_vec = append(aic_vec, log_reg$aic)
   dim_vec = append(dim_vec, i)
-}
+#}
 
 #plot results
 plot(dim_vec, aic_vec, ylab="AIC", xlab="Dimensions in word2vec model", ylim = c(0,800))
@@ -971,7 +931,7 @@ colnames(testing_mat)[1] <- "sarcasm"
 
 #fit logsitic regression
 log_reg = glm(sarcasm~., family='binomial', data=training_mat)
-summary(log_reg)
+# summary(log_reg)
 ```
 
 ```{r GloVe Train Metrics for Base, warning=FALSE}
@@ -1459,3 +1419,72 @@ Re_weighted_LASSO_test <- Recall(y_true, y_pred, positive = 1)
 Pr_weighted_LASSO_test <- Precision(y_true, y_pred, positive = 1)
 F1_weighted_LASSO_test <- F1_Score(y_true, y_pred, positive = 1)
 ```
+
+# Introduction
+
+# Data Collection Method
+describe how we scappred Not How Girls Work Subreddit
+
+
+## Variable Description
+
+Show example of our full data set show
+
+## Data Preprocessing
+
+Explain we only used Sarcastic and body columns. We used regex to remove /s. We then remove stopwords, lemmatize, etc.
+
+# Feature Extraction Methods
+interpreting text as data is lots of work say something about why that's tough and we need ways to vectorize text.
+
+## TF-IDF
+
+Explain tf-idf. Show what final result is for design matrix and explain how you got there.
+
+
+## Word2Vec
+
+Explain word2vec. Show what final result is for design matrix and explain how you got there.
+
+## Glove
+
+Explain Glove. Show what final result is for design matrix and explain how you got there.
+
+# Evaluation Metrics
+
+Describe Precision, Recall, F1.
+
+# Regression Analysis
+This analysis is a comparison of logistic model performance when using 3 types of feature extraction.
+
+## Variable Selection 
+
+### TF-IDF Selection
+
+### Word2Vec Selectopm
+
+### Glove Selection
+
+## Metric Evaluation
+
+### TF-IDF Evaluation
+
+### Word2Vec Evaluation
+
+### Glove Evaluation
+
+## Violations
+
+### TF-IDF Violations
+
+### Word2Vec Violations
+
+### Glove Violations
+
+# Conclusion
+
+## Model Comparison
+
+## Limitations
+
+## Final Remarks

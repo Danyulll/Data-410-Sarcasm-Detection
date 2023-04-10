@@ -17,3 +17,13 @@ purrr
 dplyr
 stringr
 forcats
+conflicted
+uchardet
+word2vec
+text2vec
+leaps
+bestglm
+VGAM
+rpart
+randomForest
+regclass
