@@ -34,19 +34,14 @@ library(text2vec)
 library(regclass)
 conflicts_prefer(MLmetrics::Recall)
 ```
+
 \newpage
-
-
-
-
 
 ```{r Loading in data}
 # Load in data
 data <- read.csv("../data/NHGW.csv")
 data <- data[,2:3]
 ```
-
-
 
 ```{r Create Corpus}
 y <- data$Sarcastic
@@ -85,15 +80,10 @@ dtm <- DocumentTermMatrix(corpus)
 tfidf_dtm <- weightTfIdf(dtm)
 ```
 
-
-
-
-
-
-
 ## Daniel's Analysis (better title later)
 
 ### Base Model
+
 The dimension of the DTM is too large by default. Can't use bestGLM as too many predictors. Do form of best subset by checking quantities of TF-IDF.
 
 ```{r Creating Quantile List}
@@ -143,6 +133,7 @@ for (quant in quants) {
 # Get best quantitle threshold by AIC
 thresh <- quants[which.min(models_aic)]
 ```
+
 The 95% percentile gave the best AIC so this is the base model I will select.
 
 ```{r Fit 95th Percentile Mode, warning=FALSE}
@@ -213,6 +204,7 @@ glm.out <- glm(y_train ~ ., family = binomial, data)
 # 6 VIFs over 10 serious collinearity problems
 VIFs_base <- vif(glm.out) 
 ```
+
 High VIFs, bad need to reduce collineairty. We try PCA now.
 
 ### PCA
@@ -281,6 +273,7 @@ VIFs_PCA <- vif(glm.out)
 ```
 
 ### LASSO
+
 ```{r Fit LASSO}
 # Construct dataframe for fitting
 x <- as.data.frame(as.matrix(tfidf_dtm[train_idx,]))
@@ -409,6 +402,7 @@ results_long <- melt(results_base_weighted, id.vars = "w1",
 ggplot(results_long, aes(x = w1, y = value, color = y_var)) +
   geom_point()
 ```
+
 We want a F1 that balances Recall and Precision but still focuses on Recall. Anything around 0.75 is good.
 
 ```{r Fit optimal base weighting, warning=FALSE}
@@ -435,7 +429,6 @@ glm.out <-
 # Percent reduction in deviance
 per_dev_red_base_weighted <- 1 - glm.out$deviance/glm.out$null.deviance
 ```
-
 
 ```{r Test Metrics for Base Weighted, warning=FALSE}
 # Get predictions
@@ -548,7 +541,8 @@ results_long <- melt(results_weighted_pca, id.vars = "w1",
 ggplot(results_long, aes(x = w1, y = value, color = y_var)) +
   geom_point() 
 ```
-F1 holds pretty steady. We go for the one that has the highest Recall, a reasonable precision, and w good F1. 0.62 has 
+
+F1 holds pretty steady. We go for the one that has the highest Recall, a reasonable precision, and w good F1. 0.62 has
 
 ```{r Fit optimal PCA weighting, warning=FALSE}
 # Fit model
@@ -706,6 +700,7 @@ results_long <- melt(results_weighted_lasso, id.vars = "w1",
 ggplot(results_long, aes(x = w1, y = value, color = y_var)) +
   geom_point() 
 ```
+
 0.55 is best
 
 ```{r Fit optimal LASSO weighting, warning=FALSE}
@@ -774,7 +769,6 @@ Re_weighted_LASSO_test <- Recall(y_true, y_pred, positive = 1)
 Pr_weighted_LASSO_test <- Precision(y_true, y_pred, positive = 1)
 F1_weighted_LASSO_test <- F1_Score(y_true, y_pred, positive = 1)
 ```
-
 
 ## Keiran's Analysis (better title later)
 
@@ -888,6 +882,7 @@ reddit_data = na.omit(reddit_data)
 #plot results
 plot(dim_vec, aic_vec, ylab="AIC", xlab="Dimensions in word2vec model", ylim = c(0,800))
 ```
+
 140 dimensions gives the best model for logistic regression
 
 ### Base Model
@@ -967,7 +962,6 @@ Re_base_test <- Recall(y_true, y_pred, positive = 1)
 Pr_base_test <- Precision(y_true, y_pred, positive = 1)
 F1_base_test <- F1_Score(y_true, y_pred, positive = 1)
 ```
-
 
 ```{r GloVe VIFs Base Model, warning=FALSE}
 # 10 VIFs over 10, serious collinearity problems
@@ -1081,6 +1075,7 @@ F1_LASSO_test <- F1_Score(y_true, y_pred, positive = 1)
 ```
 
 ### Weighted Base Model
+
 ```{r GloVe Get results for weighted base model, warning=FALSE}
 # Construct dataframe for fitting
 x_train <- as.data.frame(as.matrix(training_mat[,2:141]))
@@ -1130,6 +1125,7 @@ results_long <- melt(results_base_weighted, id.vars = "w1", variable.name = "y_v
 # Visualize
 ggplot(results_long, aes(x = w1, y = value, color = y_var)) + geom_point()
 ```
+
 We want a F1 that balances Recall and Precision but still focuses on Recall. Anything around 0.7 is good.
 
 ```{r GloVe Fit optimal base weighting, warning=FALSE}
@@ -1233,6 +1229,7 @@ results_long <- melt(results_weighted_pca, id.vars = "w1", variable.name = "y_va
 # Visualize
 ggplot(results_long, aes(x = w1, y = value, color = y_var)) + geom_point() 
 ```
+
 Precision holds pretty steady while recall and F1 increase with weighting. We want a weighting with a good balance of all three where the recall plateaus. All scores are good at 0.9, which is also the beginning of the plateau.
 
 ```{r GloVe Fit optimal PCA weighting, warning=FALSE}
@@ -1365,6 +1362,7 @@ results_long <- melt(results_weighted_lasso, id.vars = "w1", variable.name = "y_
 # Visualize
 ggplot(results_long, aes(x = w1, y = value, color = y_var)) + geom_point() 
 ```
+
 Recall and F1 plateau at 0.9
 
 ```{r GloVe Fit optimal LASSO weighting, warning=FALSE}
@@ -1422,25 +1420,61 @@ F1_weighted_LASSO_test <- F1_Score(y_true, y_pred, positive = 1)
 
 # Introduction
 
-# Data Collection Method
-describe how we scappred Not How Girls Work Subreddit
+Reddit is an American social news website that hosts discussion boards where users can share, comment and vote on various posts (Reddit wikipedia). These posts are housed in subreddits which are communities on Reddit focused on a specific topic.
 
+When writing comments on Reddit users will often write /s at the end of their post to indicate their comment is Sarcastic. This, coupled with Reddit's web scrapping Python API, provides a self labeled data set of sarcatic comments.
+
+The goal our analysis will be to use the /s as a binary indicator of a comment being sarcastic and fit a Logistic regression model. We can then explore this model's efficacy and optimize it for prediction.
+
+## Data Collection Method
+
+On the subreddit dataisbeautiful one user posted the following figure (figure citation):
+
+![sarcastic_subreddits](../img/dataisbeautsar.png){width=60%}
+
+We began by scrapping the top 10,000 posts from each of the above subreddits. We found that all the subbreddits had approximately a 1:100 ratio for sarcastic to non-sarcastic comments. We constructed our first data set by sampling from all the above subbreddits however, we found the data to be too 0 heavy and no model specification could learn an underlying relationship between words and sarcasm. We then attempted to fit models to various ratios of sarcastic to non-sarcastic comments. We found that Logistic regression began to perform reasonably well at a ratio of 1:2 sarcastic to non-sarcastic. We also found that models tended to perform far better if all comments came from a single subreddit as opposed to multiple. As per our prelimnary results we opted for a single subreddit at a ratio of 1:2 sarcastic to non sarcastic comments. NotHowGirlsWork was found to have the largest count of Sarcastic comments at 321 therefore we selected this subreddit for our data set.
 
 ## Variable Description
 
-Show example of our full data set show
+Our data set is constructed as follows:
+
+![data set table](../img/table.png)
+
+where Body is the raw comment string scrapped from the comment and Sarcastic is 1 when /s is present in the comment and 0 when it is not.
 
 ## Data Preprocessing
 
-Explain we only used Sarcastic and body columns. We used regex to remove /s. We then remove stopwords, lemmatize, etc.
+In Natural Language Processing there are various text preprocessing steps that are common to employ (text as data citation):
+
+- Punctuation, whitespace, and number removal - any punctuation characters such as !, @, #, etc. as well as empty space and numbers are removed. 
+- Stopword Removal - removal of words that fail to provide much contextual information, e.g., articles such as 'a' or 'the'.
+- Stemming - identifying roots in tokens and truncating words to their root, e.g., fishing and fisher transformed to fish.
+
+In our data set we first removed the /s from every sarcastic comment and preforemd the above preprocessing steps.
 
 # Feature Extraction Methods
-interpreting text as data is lots of work say something about why that's tough and we need ways to vectorize text.
+
+In order to use text as data in a Logistic regression we must numerically encode our strings. There are a plethora of feature extraction methods in NLP. For our analysis we compare TF-IDF, Word2Vec, and GloVe.
 
 ## TF-IDF
 
-Explain tf-idf. Show what final result is for design matrix and explain how you got there.
+Term frequency inverse document frequency (TFIDF) is a heuristic to identify term importance (text mining in R citation). It calculate the frequency with which a term appears and adjusts it for its rarity. Rare terms are given increased values and common terms are given decreased values (text as data citation).
 
+TFIDF is given by 
+
+$$\text{TFIDF}(t) = \text{TF}(t) \times \text{IDF}(t)$$
+where
+$$\text{TF}(t) = \frac{\# \text{ of times term t appears in a document}}{\# \text{ of terms in the document}}$$
+
+and
+$$\text{IDF}(t) = \text{ln}\left(\frac{\# \text{ total number of documents}}{\# \text{ number of documents where t appears}}\right)$$
+
+In our analysis a document is a Reddit comment. After being preprocessed the text of each comment is separated into individual terms and has its TFIDF calculated. From there the TFIDF values are placed in a Document Term Matrix (DTM). This matrix has rows as the documents and each column in a term. It is therefore a sparse matrix where entries are the TFIDF score for a specified term in a specified document.
+
+The DTM acts as the design matrix for our Logistic Regression model: **TO DO: ask if john wants this level of explanantion**
+```{r Show what a DTM looks like}
+inspect(tfidf_dtm[5:10,1:8])
+```
 
 ## Word2Vec
 
@@ -1452,22 +1486,49 @@ Explain Glove. Show what final result is for design matrix and explain how you g
 
 # Evaluation Metrics
 
-Describe Precision, Recall, F1.
+This paper shows we can use these metrics for this: https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=9320958&tag=1
+
+for definition of recall, precision, and f1 use: Hands-On Ensemble Learning with Python
+
+Model performance is assessed based on classification performance. In sentiment analysis the most common metrics to tune model performance for are Precision, Recall, and F1 Score (above paper citation). 
+
+Precision is the number of true positive divided by the number of true and false positives. Recall is the number of true positive divided by false negatives and true positive. It is the true positive rate. F1 Score is the harmonic mean of Recall and Precision (python learning citation).
+
+For our analysis a true positive is a sarcastic comment and we therefore want to optimize our models for identifying this class of comments.
 
 # Regression Analysis
-This analysis is a comparison of logistic model performance when using 3 types of feature extraction.
 
-## Variable Selection 
+This analysis is a comparison of logistic model performance when using 3 types of feature extraction and 6 styles of regression model. First we will all fit a base model, then a PCA model, and finally a LASSO model. After this we perform weighting on all 3 model types and decide a best model for each feature extraction method. Finally, we compare the best 3 models to decide which model and feature extraction yield the best results.
+
+We hypothesis that the TF-IDF models will perform the worst as they are the simplest. **To do finish hypothesis**
+
+## Variable Selection
 
 ### TF-IDF Selection
 
-### Word2Vec Selectopm
+#### Base model
+
+The initial DTM after text processing was $642 \times 2074$. This matrix has far too many columns compared to rows and so some dimensionality reduction was required. One way to do so is to filter away unimportant terms. This can be decided by the quantiles of the TF-IDF. We can exclude any columns of the DTM based on whether or not their values fall within a certain percentile. If we do this for all percentile between 1 to 100 in steps of 5 we can record the AIC and choose the best subsetted model.
+
+The minimum AIC found was 734 for a model not including any terms who had TF-IDF values below the 95th percentile. This resulted in a 14% reduction in deviance. Thew new dimensions of the DTM were $512 \times 74$. 6 VIFs were found to be over 10 indicating serious multicollinearity in the model and several of the coefficients for temrs in in the model were unable to be estiamted and assigned a NA.
+
+#### PCA model
+
+#### LASSO model
+
+### Word2Vec Selection
 
 ### Glove Selection
 
 ## Metric Evaluation
 
 ### TF-IDF Evaluation
+
+#### Base Model
+
+#### PCA model
+
+#### LASSO model
 
 ### Word2Vec Evaluation
 
@@ -1488,3 +1549,12 @@ This analysis is a comparison of logistic model performance when using 3 types o
 ## Limitations
 
 ## Final Remarks
+
+# References
+
+<https://en.wikipedia.org/wiki/Reddit#References>
+
+<https://www.reddit.com/r/dataisbeautiful/comments/9q7meu/most_sarcastic_subreddits_oc/>
+
+Text as Data
+Barry DeVille, Gurpreet Singh Bawa
