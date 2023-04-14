@@ -39,6 +39,7 @@ conflicts_prefer(MLmetrics::Recall)
 
 \newpage
 
+<!--------------------------------------------------------------TFIDF CODE-------------------------------------------------------------------->
 ```{r Loading in data}
 # Load in data
 data <- read.csv("../data/NHGW.csv")
@@ -82,10 +83,6 @@ dtm <- DocumentTermMatrix(corpus)
 tfidf_dtm <- weightTfIdf(dtm)
 ```
 
-
-
-The dimension of the DTM is too large by default. Can't use bestGLM as too many predictors. Do form of best subset by checking quantities of TF-IDF. We will fit increments of 5% for quantiles and see which produces best AIC
-
 ```{r Creating Quantile List}
 # Set seed
 set.seed(874)
@@ -104,13 +101,13 @@ tfidf_vec <- tfidf_vec[tfidf_vec > 0]
 quants <- quantile(tfidf_vec, probs = seq(0.05,0.95,0.05))
 
 # Only keep quantiles that result in matrices with fewer columns than rows
-# cols <- c()
-# for (quant in quants) {
-#   cols <- c(cols, ncol(tfidf_dtm[train_idx,tfidf_dtm$v > quant]))
-# }
-
- # numRows <- nrow(tfidf_dtm[train_idx,])
- # quants <- quants[which(cols < numRows)]
+ # cols <- c()
+ # for (quant in quants) {
+ #   cols <- c(cols, ncol(tfidf_dtm[train_idx,tfidf_dtm$v > quant]))
+ # }
+ # 
+ #  numRows <- nrow(tfidf_dtm[train_idx,])
+ #  quants <- quants[which(cols < numRows)]
 ```
 
 ```{r Perform Best Subset Regression, cache=TRUE, message=FALSE,warning=FALSE}
@@ -119,12 +116,12 @@ models_aic <- list()
 for (quant in quants) {
   # Filter DTM
   tfidf_dtm_r <- tfidf_dtm[train_idx, tfidf_dtm$v > quant]
-  
+
   # Construct dataframe for fitting
   x <- as.data.frame(as.matrix(tfidf_dtm_r))
   y_train <- y[train_idx]
   data <- cbind(y_train, x)
-  
+
   # Fit model
   glm.out <- glm(y_train ~ ., family = binomial, data)
   models_aic <- append(models_aic, glm.out$aic)
@@ -133,8 +130,6 @@ for (quant in quants) {
 # Get best quantitle threshold by AIC
 thresh <- quants[which.min(models_aic)]
 ```
-
-The 95% percentile gave the best AIC so this is the base model I will select.
 
 ```{r Fit 95th Percentile Mode, warning=FALSE}
 # Filter DTM
@@ -153,8 +148,6 @@ glm.out <- glm(y_train~., family = binomial, data)
 # Percent reduction in deviance
 per_dev_red_base <- 1 - glm.out$deviance/glm.out$null.deviance
 ```
-
-There are several NAs, not good. Let's get results.
 
 ```{r Train Metrics for Base}
 # Get predictions
@@ -206,11 +199,6 @@ glm.out <- glm(y_train ~ ., family = binomial, data)
 # 6 VIFs over 10 serious collinearity problems
 VIFs_base <- vif(glm.out) 
 ```
-
-High VIFs, bad need to reduce collineairty. We try PCA now.
-
-
-We keep up to 90th percentile
 
 ```{r Perform PCA, warning=FALSE}
 pca.out <- prcomp(as.data.frame(as.matrix(tfidf_dtm_r)))
@@ -266,14 +254,10 @@ Pr_PCA_test <- Precision(y_true, y_pred, positive = 1)
 F1_PCA_test <- F1_Score(y_true, y_pred, positive = 1)
 ```
 
-Very not good predicts everything as not sar.
-
 ```{r VIFs PCA Model, warning=FALSE}
 # All 1
 VIFs_PCA <- vif(glm.out) 
 ```
-
-
 
 ```{r Fit LASSO}
 # Construct dataframe for fitting
@@ -329,8 +313,6 @@ Pr_LASSO_test <- Precision(y_true, y_pred, positive = 1)
 F1_LASSO_test <- F1_Score(y_true, y_pred, positive = 1)
 ```
 
-
-
 ```{r Get results for weighted base model, warning=FALSE}
 # Recreate DTM
 tfidf_dtm_r <- tfidf_dtm[train_idx, tfidf_dtm$v > thresh]
@@ -341,9 +323,9 @@ y_train <- y[train_idx]
 data <- cbind(y_train, x)
 test_data <- cbind(as.data.frame(as.matrix(tfidf_dtm[test_idx, ])))
 results_base_weighted <-
-  data.frame(Re = NA,
-             Pr = NA,
-             F1 = NA,
+  data.frame(Recall = NA,
+             Precision = NA,
+             F1.Score = NA,
              w1 = NA)
 
 # For each weight calculate metrics
@@ -385,9 +367,9 @@ for (w1 in seq(0, 1, 0.01)) {
   
   results_base_weighted <-
     rbind(results_base_weighted, data.frame(
-      Re = Re,
-      Pr = Pr,
-      F1 = F1,
+      Recall = Re,
+      Precision = Pr,
+      F1.Score = F1,
       w1 = w1
     ))
 }
@@ -397,14 +379,12 @@ results_base_weighted <- na.omit(results_base_weighted)
 ```{r Visualize results_base_weighted}
 # Reshape data 
 results_long <- melt(results_base_weighted, id.vars = "w1", 
-                     variable.name = "y_var", value.name = "value")
-
+                     variable.name = "Test Metrics", value.name = "value")
 # Visualize
-results_base_weighted_p <- ggplot(results_long, aes(x = w1, y = value, color = y_var)) +
-  geom_point()
+results_base_weighted_p <- ggplot(results_long, aes(x = w1, y = value, color =`Test Metrics` )) +
+  geom_point()+ ggtitle("Base Model Test Metrics vs Weighting") +
+  xlab("Weighting") + ylab("Test Metric") + theme(plot.title = element_text(hjust = 0.5))
 ```
-
-We want a F1 that balances Recall and Precision but still focuses on Recall. Anything around 0.75 is good.
 
 ```{r Fit optimal base weighting, warning=FALSE}
 # Fit model
@@ -451,7 +431,6 @@ Pr_base_weighted_train <- Precision(y_true, y_pred, positive = 1)
 F1_base_weighted_train <- F1_Score(y_true, y_pred, positive = 1)
 ```
 
-
 ```{r Test Metrics for Base Weighted, warning=FALSE}
 # Get predictions
 test_data <- cbind(as.data.frame(as.matrix(tfidf_dtm[test_idx, ])))
@@ -485,8 +464,6 @@ glm.out <- glm(y_train ~ ., family = binomial, data)
 VIFs_weighted_base <- vif(glm.out) 
 ```
 
-
-
 ```{r Get results for weighted PCA model, warning=FALSE}
 # Recreate DTM
 tfidf_dtm_r <- tfidf_dtm[train_idx, tfidf_dtm$v > thresh]
@@ -501,9 +478,9 @@ test_data <- as.data.frame(pca.out.test[,1:24])
 
 # Create results dataframe
 results_weighted_pca <-
-  data.frame(Re = NA,
-             Pr = NA,
-             F1 = NA,
+  data.frame(Recall = NA,
+             Precision = NA,
+             F1.Score = NA,
              w1 = NA)
 
 # For each weight calculate metrics
@@ -545,9 +522,9 @@ for (w1 in seq(0, 1, 0.01)) {
   
   results_weighted_pca <-
     rbind(results_weighted_pca, data.frame(
-      Re = Re,
-      Pr = Pr,
-      F1 = F1,
+      Recall = Re,
+      Precision = Pr,
+      F1.Score = F1,
       w1 = w1
     ))
 }
@@ -557,14 +534,13 @@ results_weighted_pca <- na.omit(results_weighted_pca)
 ```{r Visualize results_PCA_weighted}
 # Reshape data 
 results_long <- melt(results_weighted_pca, id.vars = "w1", 
-                     variable.name = "y_var", value.name = "value")
+                     variable.name = "Test Metrics", value.name = "value")
 
 # Visualize
-results_PCA_weighted_p <- ggplot(results_long, aes(x = w1, y = value, color = y_var)) +
-  geom_point() 
+results_PCA_weighted_p <- ggplot(results_long, aes(x = w1, y = value, color =`Test Metrics`)) +
+  geom_point() + ggtitle("PCA Model Test Metrics vs Weighting") +
+  xlab("Weighting") + ylab("Test Metric") + theme(plot.title = element_text(hjust = 0.5))
 ```
-
-F1 holds pretty steady. We go for the one that has the highest Recall, a reasonable precision, and w good F1. 0.62 has
 
 ```{r Fit optimal PCA weighting, warning=FALSE}
 # Fit model
@@ -634,8 +610,6 @@ F1_weighted_PCA_test <- F1_Score(y_true, y_pred, positive = 1)
 VIFs_weighted_PCA <- vif(glm.out) # none over 10
 ```
 
-
-
 ```{r refit best LASSO}
 # Construct dataframe for fitting
 x <- as.data.frame(as.matrix(tfidf_dtm[train_idx,]))
@@ -656,9 +630,9 @@ test_data <- as.matrix(tfidf_dtm[test_idx, ])
 
 # Create results dataframe
 results_weighted_lasso <-
-  data.frame(Re = NA,
-             Pr = NA,
-             F1 = NA,
+  data.frame(Recall = NA,
+             Precision = NA,
+             `F1 Score` = NA,
              w1 = NA)
 
 # For each weight calculate metrics
@@ -704,9 +678,9 @@ for (w1 in seq(0.01, 0.99, 0.01)) {
   
   results_weighted_lasso <-
     rbind(results_weighted_lasso, data.frame(
-      Re = Re,
-      Pr = Pr,
-      F1 = F1,
+      Recall = Re,
+      Precision = Pr,
+      F1.Score = F1,
       w1 = w1
     ))
 }
@@ -716,14 +690,13 @@ results_weighted_lasso <- na.omit(results_weighted_lasso)
 ```{r Visualize results_weighted_lasso}
 # Reshape data 
 results_long <- melt(results_weighted_lasso, id.vars = "w1", 
-                     variable.name = "y_var", value.name = "value")
+                    variable.name = "Test Metrics", value.name = "value")
 
 # Visualize
-results_weighted_lasso_p <- ggplot(results_long, aes(x = w1, y = value, color = y_var)) +
-  geom_point() 
+results_weighted_lasso_p <- ggplot(results_long, aes(x = w1, y = value, color =`Test Metrics`)) +
+  geom_point() + ggtitle("LASSO Model Test Metrics vs Weighting") +
+  xlab("Weighting") + ylab("Test Metric") + theme(plot.title = element_text(hjust = 0.5))
 ```
-
-0.55 is best
 
 ```{r Fit optimal LASSO weighting, warning=FALSE}
 # Fit model
@@ -791,7 +764,1442 @@ Re_weighted_LASSO_test <- Recall(y_true, y_pred, positive = 1)
 Pr_weighted_LASSO_test <- Precision(y_true, y_pred, positive = 1)
 F1_weighted_LASSO_test <- F1_Score(y_true, y_pred, positive = 1)
 ```
+<!-------------------------------------------------------------------------------------------------------------------------------------------->
 
+<!--------------------------------------------------------------GloVe CODE-------------------------------------------------------------------->
+```{r GloVe Loading Data, warning=FALSE}
+reddit_data <- read.csv("../data/NHGW.csv",header=T, encoding = "UTF-8")
+attach(reddit_data)
+```
+
+```{r GloVe Cleaning Data, warning=FALSE}
+#removing punctuation
+reddit_data$Body = removePunctuation(reddit_data$Body, ucp=TRUE)
+#everything lowercase
+reddit_data$Body = tolower(reddit_data$Body)
+#remove stopwords
+reddit_data$Body = removeWords(reddit_data$Body, stopwords("english"))
+#strip whitespace
+reddit_data$Body = stripWhitespace(reddit_data$Body)
+#remove numbers
+reddit_data$Body = removeNumbers(reddit_data$Body)
+#stemming
+reddit_data$Body = stemDocument(reddit_data$Body)
+#convert encoding
+reddit_data$Body = txt_clean_word2vec(reddit_data$Body)
+#remove NA rows
+reddit_data = na.omit(reddit_data)
+#remove rows with NA encoding
+n = nrow(reddit_data)
+for(i in 1:n){
+  if(is.na(detect_str_enc(reddit_data[i,]$Body))){
+    reddit_data <- reddit_data[-c(i),]
+  }
+}
+#any(is.na(detect_str_enc(reddit_data$Body)))
+```
+
+```{r GloVe Creating Training/Testing Datasets, warning=FALSE}
+# split into training and testing sets
+set.seed(874)
+N = nrow(reddit_data)                                      
+n = round(N*0.8)                               
+m = N-n 
+tr_ind <- sample(N, n)            
+te_ind <- setdiff(seq_len(N), tr_ind)
+
+reddit_train <- reddit_data[tr_ind,]
+reddit_test <- reddit_data[te_ind,]
+```
+
+```{r GloVe Vector Sum Function, warning=FALSE}
+# creating a function to make sentences into vectors
+sentence_vec <- function(words){
+  sum <- 0
+  for(x in 1:nrow(words)){
+    if(words[x,1] %in% rownames(word_vectors)){
+      sum <- sum + word_vectors[words[x,1], ,drop = FALSE]
+    }
+  }
+  return(sum)
+}
+```
+
+```{r GloVe Finding Best Dimension for GloVe Model, warning=FALSE}
+#create empty aic and dim vectors
+f1_vec_glove = c()
+dim_vec_glove = c()
+reddit_data = na.omit(reddit_data)
+
+  # Create iterator over tokens
+  tokens <- space_tokenizer(reddit_train$Body)
+  # Create vocabulary. Terms will be unigrams (simple words).
+  it = itoken(tokens, progressbar = FALSE)
+  vocab <- create_vocabulary(it)
+  vocab <- prune_vocabulary(vocab, term_count_min = 5L) # wonder which of 3-5 is best
+  
+  vectorizer <- vocab_vectorizer(vocab)
+  # use window of 5 for context words
+  tcm <- create_tcm(it, vectorizer, skip_grams_window = 5L)
+  
+#for(i in 1:200){
+  #for(x in 1:5){
+  # fitting the GLOVE model
+  glove = GlobalVectors$new(rank = 150, x_max = 10)
+  wv_main = glove$fit_transform(tcm, n_iter = 10, convergence_tol = 0.01, n_threads = 8)
+  
+  # creating word vectors
+  wv_context = glove$components
+  word_vectors = wv_main + t(wv_context)
+
+  training_mat <- c()
+  for(x in 1:nrow(reddit_train)){
+    token <- space_tokenizer(reddit_train$Body[x])
+    words = itoken(token, progressbar = FALSE)
+    words <- create_vocabulary(words)
+    sentenceVec <- sentence_vec(words)
+    training_mat <- rbind(training_mat, sentenceVec)
+  }
+
+  training_mat <- cbind(reddit_train$Sarcastic, training_mat)
+  training_mat <- data.frame(training_mat)
+  colnames(training_mat)[1] <- "sarcasm"
+
+  
+  # creating testing matrix
+  testing_mat <- c()
+  for(x in 1:nrow(reddit_test)){
+    token <- space_tokenizer(reddit_test$Body[x])
+    words <- itoken(token, progressbar = FALSE)
+    words <- create_vocabulary(words)
+    sentenceVec <- sentence_vec(words)
+    testing_mat <- rbind(testing_mat, sentenceVec)
+  }
+  
+  testing_mat <- cbind(reddit_train$Sarcastic, testing_mat)
+  testing_mat <- data.frame(testing_mat)
+  colnames(testing_mat)[1] <- "sarcasm"
+
+  #fit logsitic regression
+  log_reg = glm(sarcasm~., family='binomial', data=training_mat)
+  
+  #f1 score of test set
+  predict.out <- predict(log_reg, newdata=testing_mat, type = "response")
+  predict.out[which(predict.out >= 0.5)] <- 1
+  predict.out[which(predict.out < 0.5)] <- 0
+  guess <- data.frame(predict.out)
+  # Format output
+  output <- cbind(guess, testing_mat[,1])
+  colnames(output)[2] <- "truth"
+  y_true <- output$truth
+  y_pred <- output$predict.out
+  
+  # Get metrics
+  f1_vec_glove = append(f1_vec_glove, F1_Score(y_true, y_pred, positive = 1))
+  dim_vec_glove = append(dim_vec_glove, i)
+#}}
+```
+
+```{r GloVe Create Base Model, warning=FALSE}
+glove = GlobalVectors$new(rank = 150, x_max = 10)
+wv_main = glove$fit_transform(tcm, n_iter = 10, convergence_tol = 0.01, n_threads = 8)
+  
+# creating word vectors
+wv_context = glove$components
+word_vectors = wv_main + t(wv_context)
+
+# creating training matrix
+training_mat <- c()
+for(x in 1:nrow(reddit_train)){
+  token <- space_tokenizer(reddit_train$Body[x])
+  words = itoken(token, progressbar = FALSE)
+  words <- create_vocabulary(words)
+  sentenceVec <- sentence_vec(words)
+  training_mat <- rbind(training_mat, sentenceVec)
+}
+
+training_mat <- cbind(reddit_train$Sarcastic, training_mat)
+training_mat <- data.frame(training_mat)
+colnames(training_mat)[1] <- "sarcasm"
+
+# creating testing matrix
+testing_mat <- c()
+for(x in 1:nrow(reddit_test)){
+  token <- space_tokenizer(reddit_test$Body[x])
+  words <- itoken(token, progressbar = FALSE)
+  words <- create_vocabulary(words)
+  sentenceVec <- sentence_vec(words)
+  testing_mat <- rbind(testing_mat, sentenceVec)
+}
+
+testing_mat <- cbind(reddit_train$Sarcastic, testing_mat)
+testing_mat <- data.frame(testing_mat)
+colnames(testing_mat)[1] <- "sarcasm"
+
+
+#fit logsitic regression
+log_reg = glm(sarcasm~., family='binomial', data=training_mat)
+#summary(log_reg)
+```
+
+```{r GloVe Train Metrics for Base, warning=FALSE}
+# Get predictions
+predict.out <- predict(log_reg, type = "response")
+predict.out[which(predict.out >= 0.5)] <- 1
+predict.out[which(predict.out < 0.5)] <- 0
+guess <- data.frame(predict.out)
+# Format output
+output <- cbind(guess, training_mat[,1])
+colnames(output)[2] <- "truth"
+y_true <- output$truth
+y_pred <- output$predict.out
+# Get metrics
+Re_base_train_glove <- Recall(y_true, y_pred, positive = 1)
+Pr_base_train_glove <- Precision(y_true, y_pred, positive = 1)
+F1_base_train_glove <- F1_Score(y_true, y_pred, positive = 1)
+```
+
+```{r GloVe Test Metrics for Base, warning=FALSE}
+# Get predictions
+predict.out <- predict(log_reg, newdata = testing_mat ,type="response")
+predict.out[which(predict.out >= 0.5)] <- 1
+predict.out[which(predict.out < 0.5)] <- 0
+guess <- data.frame(predict.out)
+# Format output
+output <- cbind(guess,testing_mat[,1])
+colnames(output)[2] <- "truth"
+y_true <- output$truth
+y_pred <- output$predict.out
+# Get metrics
+Re_base_test_glove <- Recall(y_true, y_pred, positive = 1)
+Pr_base_test_glove <- Precision(y_true, y_pred, positive = 1)
+F1_base_test_glove <- F1_Score(y_true, y_pred, positive = 1)
+```
+
+```{r GloVe VIFs Base Model, warning=FALSE}
+# 10 VIFs over 10, serious collinearity problems
+VIFs_base <- vif(log_reg) 
+```
+
+```{r GloVe Perform PCA, warning=FALSE}
+
+pca.out <- prcomp(as.data.frame(as.matrix(training_mat[,2:151])))
+pca.out.test <- predict(pca.out, as.data.frame(testing_mat[,2:151]))
+
+#first 71 pc explain 90% of the variance
+#summary(pca.out)
+
+pcs <- as.data.frame(pca.out$x[,1:71])
+
+train_data <- cbind(reddit_train$Sarcastic,pcs)
+colnames(train_data)[1] <- "sarcasm"
+
+
+# Fit model
+log_reg = glm(sarcasm~., family='binomial', data=train_data)
+```
+
+```{r GloVe Train Metrics for PCA, warning=FALSE}
+predict.out <- predict(log_reg,type="response")
+predict.out[which(predict.out >= 0.5)] <- 1
+predict.out[which(predict.out < 0.5)] <- 0
+guess <- data.frame(predict.out)
+# Format output
+output <- cbind(guess,training_mat[,1])
+colnames(output)[2] <- "truth"
+y_true <- output$truth
+y_pred <- output$predict.out
+# Get metrics
+Re_PCA_train_glove <- Recall(y_true, y_pred, positive = 1)
+Pr_PCA_train_glove <- Precision(y_true, y_pred, positive = 1)
+F1_PCA_train_glove <- F1_Score(y_true, y_pred, positive = 1)
+```
+
+```{r GloVe Test Metrics for PCA, warning=FALSE}
+predict.out <- predict(log_reg,newdata = as.data.frame(pca.out.test),type="response")
+predict.out[which(predict.out >= 0.5)] <- 1
+predict.out[which(predict.out < 0.5)] <- 0
+guess <- data.frame(predict.out)
+# Format output
+output <- cbind(guess,testing_mat[,1])
+colnames(output)[2] <- "truth"
+y_true <- output$truth
+y_pred <- output$predict.out
+# Get metrics
+Re_PCA_test_glove <- Recall(y_true, y_pred, positive = 1)
+Pr_PCA_test_glove <- Precision(y_true, y_pred, positive = 1)
+F1_PCA_test_glove <- F1_Score(y_true, y_pred, positive = 1)
+```
+
+```{r GloVe VIFs PCA Model, warning=FALSE}
+# All 1
+VIFs_PCA <- vif(log_reg) 
+```
+
+```{r GloVe Fit LASSO, warning=FALSE}
+# Construct matrix for fitting
+x_train <- as.matrix(training_mat[,2:151])
+y_train <- training_mat[,1]
+
+# Perform CV
+glmnet.cv.out <- cv.glmnet(x_train,y_train,family="binomial",alpha = 1)
+best_lambda <- glmnet.cv.out$lambda.min
+
+# Fit best found model
+glmnet.out <- glmnet(x_train,y_train,family="binomial",alpha = 1,lambda = best_lambda)
+```
+
+```{r GloVe Train Metrics for LASSO, warning=FALSE}
+# Get predictions
+predict.out <- predict(glmnet.out, as.matrix(training_mat[,2:151]),type = "response")
+predict.out[which(predict.out >= 0.5)] <- 1
+predict.out[which(predict.out < 0.5)] <- 0
+guess <- data.frame(predict.out)
+# Format output
+output <- cbind(guess, training_mat[,1])
+colnames(output)[2] <- "truth"
+y_true <- output$truth
+y_pred <- output$s0
+# Get metrics
+Re_LASSO_train_glove <- Recall(y_true, y_pred, positive = 1)
+Pr_LASSO_train_glove <- Precision(y_true, y_pred, positive = 1)
+F1_LASSO_train_glove <- F1_Score(y_true, y_pred, positive = 1)
+```
+
+```{r GloVe Test Metrics for LASSO, warning=FALSE}
+# Get predictions
+predict.out <- predict(glmnet.out,newx = as.matrix(testing_mat[,2:151]),type="response")
+predict.out[which(predict.out >= 0.5)] <- 1
+predict.out[which(predict.out < 0.5)] <- 0
+guess <- data.frame(predict.out)
+# Format output
+output <- cbind(guess, testing_mat[,1])
+colnames(output)[2] <- "truth"
+y_true <- output$truth
+y_pred <- output$s0
+# Get metrics
+Re_LASSO_test_glove <- Recall(y_true, y_pred, positive = 1)
+Pr_LASSO_test_glove <- Precision(y_true, y_pred, positive = 1)
+F1_LASSO_test_glove <- F1_Score(y_true, y_pred, positive = 1)
+```
+
+```{r GloVe Get results for weighted base model, warning=FALSE}
+# Construct dataframe for fitting
+x_train <- as.data.frame(as.matrix(training_mat[,2:151]))
+y_train <- training_mat[,1]
+results_base_weighted <- data.frame(Re = NA,Pr = NA,F1 = NA,w1 = NA)
+
+# For each weight calculate metrics
+for (w1 in seq(0, 1, 0.01)) {
+  weights <- c()
+  # w1 = 0.01
+  w2 = 1 - w1
+  
+  for (i in 1:length(y_train)) {
+    if (training_mat[i,1] == 1) {
+      weights <- c(weights, w1)
+    } else{
+      weights <- c(weights, w2)
+    }
+  }
+  
+  # Fit model
+  glm.out <- glm(y_train ~ .,family = binomial,data = x_train,weights = weights)
+  
+  # Get results
+  predict.out <- predict(glm.out, newdata = testing_mat[,2:151] , type = "response")
+  predict.out[which(predict.out >= 0.5)] <- 1
+  predict.out[which(predict.out < 0.5)] <- 0
+  guess <- data.frame(predict.out)
+  output <- cbind(guess, testing_mat[,1])
+  colnames(output)[2] <- "truth"
+  y_true <- output$truth
+  y_pred <- output$predict.out
+  
+  # Get metrics
+  Re <- Recall(y_true, y_pred, positive = 1)
+  Pr <- Precision(y_true, y_pred, positive = 1)
+  F1 <- F1_Score(y_true, y_pred, positive = 1)
+  
+  results_base_weighted <- rbind(results_base_weighted, data.frame(Re = Re,Pr = Pr,F1 = F1,w1 = w1))
+}
+results_base_weighted <- na.omit(results_base_weighted)
+```
+
+```{r GloVe Visualize results_base_weighted, warning=FALSE}
+# Reshape data 
+results_long_base_glove <- melt(results_base_weighted, id.vars = "w1", variable.name = "y_var", value.name = "value")
+# Visualize weighted base weightings
+ggplot(results_long_base_glove, aes(x = w1, y = value, color = y_var)) + geom_point()
+```
+
+```{r GloVe Fit optimal base weighting, warning=FALSE}
+# Fit model
+w1 = 0.85
+w2 = 1 - w1
+weights <- c()
+for (i in 1:length(y_train)) {
+  if (y_train[i] == 1) {
+    weights <- c(weights, w1)
+  } else{
+    weights <- c(weights, w2)
+  }
+}
+# Fit model
+glm.out <- glm(y_train ~ .,family = binomial,data = x_train,weights = weights)
+# Percent reduction in deviance
+per_dev_red_base_weighted <- 1 - glm.out$deviance/glm.out$null.deviance
+```
+
+```{r GloVe Train Metrics for Weighted base, warning=FALSE}
+# Get predictions
+predict.out <- predict(glm.out, type = "response")
+predict.out[which(predict.out >= 0.5)] <- 1
+predict.out[which(predict.out < 0.5)] <- 0
+guess <- data.frame(predict.out)
+# Format output
+output <- cbind(guess, y_train)
+colnames(output)[2] <- "truth"
+y_true <- output$truth
+y_pred <- output$predict.out
+# Get metrics
+Re_weighted_base_train_glove <- Recall(y_true, y_pred, positive = 1)
+Pr_weighted_base_train_glove <- Precision(y_true, y_pred, positive = 1)
+F1_weighted_base_train_glove <- F1_Score(y_true, y_pred, positive = 1)
+```
+
+```{r GloVe Test Metrics for Base Weighted, warning=FALSE}
+# Get predictions
+test_data <- cbind(as.data.frame(as.matrix(testing_mat[,2:151])))
+predict.out <- predict(glm.out, newdata = test_data , type = "response")
+predict.out[which(predict.out >= 0.5)] <- 1
+predict.out[which(predict.out < 0.5)] <- 0
+guess <- data.frame(predict.out)
+# Format output
+output <- cbind(guess, testing_mat[,1])
+colnames(output)[2] <- "truth"
+y_true <- output$truth
+y_pred <- output$predict.out
+# Get metrics
+Re_weighted_base_test_glove <- Recall(y_true, y_pred, positive = 1)
+Pr_weighted_base_test_glove <- Precision(y_true, y_pred, positive = 1)
+F1_weighted_base_test_glove <- F1_Score(y_true, y_pred, positive = 1)
+```
+
+```{r GloVe VIFs Base Weighted Model, warning=FALSE}
+# Most of the VIFs over 10
+VIFs_weighted_base <- vif(glm.out) 
+```
+
+```{r GloVe Get results for weighted PCA model, warning=FALSE}
+y_train <- training_mat[,1]
+pca.out <- prcomp(as.data.frame(as.matrix(training_mat[,2:151])))
+pca.out.test <- predict(pca.out, as.data.frame(as.matrix(testing_mat[,2:151])))
+# 90th cumulative proportion is given by PC1:PC24
+pcs <- as.data.frame(pca.out$x[,1:71])
+train_data <- cbind(y_train,pcs)
+test_data <- as.data.frame(pca.out.test[,1:71])
+# Create results dataframe
+results_weighted_pca <- data.frame(Re = NA, Pr = NA, F1 = NA, w1 = NA)
+# For each weight calculate metrics
+for (w1 in seq(0, 1, 0.01)) {
+  weights <- c()
+  # w1 = 0.01
+  w2 = 1 - w1
+  
+  for (i in 1:length(y_train)) {
+    if (y_train[i] == 1) {
+      weights <- c(weights, w1)
+    } else{
+      weights <- c(weights, w2)
+    }
+  }
+  
+  # Fit model
+  glm.out <- glm(y_train ~ ., family = binomial, data = train_data, weights = weights)
+  
+  # Get results
+  predict.out <- predict(glm.out, newdata = test_data , type = "response")
+  predict.out[which(predict.out >= 0.5)] <- 1
+  predict.out[which(predict.out < 0.5)] <- 0
+  guess <- data.frame(predict.out)
+  output <- cbind(guess, testing_mat[,1])
+  colnames(output)[2] <- "truth"
+  y_true <- output$truth
+  y_pred <- output$predict.out
+  
+  # Get metrics
+  Re <- Recall(y_true, y_pred, positive = 1)
+  Pr <- Precision(y_true, y_pred, positive = 1)
+  F1 <- F1_Score(y_true, y_pred, positive = 1)
+  
+  results_weighted_pca <- rbind(results_weighted_pca, data.frame(
+      Re = Re,
+      Pr = Pr,
+      F1 = F1,
+      w1 = w1
+    ))
+}
+results_weighted_pca <- na.omit(results_weighted_pca)
+```
+
+```{r GloVe Visualize results_PCA_weighted, warning=FALSE}
+# Reshape data 
+results_long_PCA_glove <- melt(results_weighted_pca, id.vars = "w1", variable.name = "y_var", value.name = "value")
+# Visualize weighted PCA weightings
+ggplot(results_long_PCA_glove, aes(x = w1, y = value, color = y_var)) + geom_point() 
+```
+
+```{r GloVe Fit optimal PCA weighting, warning=FALSE}
+# Fit model
+w1 = 0.88
+w2 = 1 - w1
+weights <- c()
+for (i in 1:length(y_train)) {
+  if (y_train[i] == 1) {
+    weights <- c(weights, w1)
+  } else{
+    weights <- c(weights, w2)
+  }
+}
+# Fit model
+glm.out <- glm(y_train ~ ., family = binomial, data = train_data, weights = weights)
+# Percent reduction in deviance
+per_dev_red_PCA <- glm.out$deviance/glm.out$null.deviance # note this is actually an increase by a factor of 19.96864
+```
+
+```{r GloVe Train Metrics for Weighted PCA, warning=FALSE}
+# Get predictions
+predict.out <- predict(glm.out, type = "response")
+predict.out[which(predict.out >= 0.5)] <- 1
+predict.out[which(predict.out < 0.5)] <- 0
+guess <- data.frame(predict.out)
+# Format output
+output <- cbind(guess, y_train)
+colnames(output)[2] <- "truth"
+y_true <- output$truth
+y_pred <- output$predict.out
+# Get metrics
+Re_weighted_PCA_train_glove <- Recall(y_true, y_pred, positive = 1)
+Pr_weighted_PCA_train_glove <- Precision(y_true, y_pred, positive = 1)
+F1_weighted_PCA_train_glove <- F1_Score(y_true, y_pred, positive = 1)
+```
+
+```{r GloVe Test Metrics for Weighted PCA, warning=FALSE}
+# Get predictions
+predict.out <- predict(glm.out, newdata = test_data ,type="response")
+predict.out[which(predict.out >= 0.5)] <- 1
+predict.out[which(predict.out < 0.5)] <- 0
+guess <- data.frame(predict.out)
+# Format output
+output <- cbind(guess, testing_mat[,1])
+colnames(output)[2] <- "truth"
+y_true <- output$truth
+y_pred <- output$predict.out
+# Get metrics
+Re_weighted_PCA_test_glove <- Recall(y_true, y_pred, positive = 1)
+Pr_weighted_PCA_test_glove <- Precision(y_true, y_pred, positive = 1)
+F1_weighted_PCA_test_glove <- F1_Score(y_true, y_pred, positive = 1)
+```
+
+```{r GloVe VIFs Weighted PCA Model, warning=FALSE}
+# All 1
+VIFs_weighted_PCA <- vif(glm.out) # none over 10
+```
+
+```{r GloVe Refit Best LASSO, warning=FALSE}
+# Construct matrix for fitting
+x_train <- as.matrix(training_mat[,2:151])
+y_train <- training_mat[,1]
+
+# Perform CV
+glmnet.cv.out <- cv.glmnet(x_train,y_train,family="binomial",alpha = 1)
+best_lambda <- glmnet.cv.out$lambda.min
+
+# Fit best found model
+glmnet.out <- glmnet(x_train,y_train,family="binomial",alpha = 1,lambda = best_lambda)
+```
+
+```{r GloVe Get results for weighted LASSO model, warning=FALSE}
+# Construct matrix for fitting
+x_train <- as.matrix(training_mat[,2:151])
+y_train <- training_mat[,1]
+testing_mat <- as.data.frame(as.matrix(testing_mat))
+
+# Create results dataframe
+results_weighted_lasso <- data.frame(Re = NA,Pr = NA,F1 = NA,w1 = NA)
+
+# For each weight calculate metrics
+for (w1 in seq(0.01, 0.99, 0.01)) {
+  weights <- c()
+  # w1 = 0.1
+  w2 = 1 - w1
+  
+  for (i in 1:length(y_train)) {
+    if (y_train[i] == 1) {
+      weights <- c(weights, w1)
+    } else{
+      weights <- c(weights, w2)
+    }
+  }
+  
+  # Fit model
+  glmnet.out <- glmnet(x_train,y_train,family = "binomial",alpha = 1,lambda = best_lambda,weights = weights)
+  
+  # Get results
+  predict.out <- predict(glmnet.out, newx = as.matrix(testing_mat[,2:151]) , type = "response")
+  predict.out[which(predict.out >= 0.5)] <- 1
+  predict.out[which(predict.out < 0.5)] <- 0
+  guess <- data.frame(predict.out)
+  output <- cbind(guess, testing_mat[,1])
+  colnames(output)[2] <- "truth"
+  y_true <- output$truth
+  y_pred <- output$s0
+  
+  # Get metrics
+  Re <- Recall(y_true, y_pred, positive = 1)
+  Pr <- Precision(y_true, y_pred, positive = 1)
+  F1 <- F1_Score(y_true, y_pred, positive = 1)
+  
+  results_weighted_lasso <-
+    rbind(results_weighted_lasso, data.frame(
+      Re = Re,
+      Pr = Pr,
+      F1 = F1,
+      w1 = w1
+    ))
+}
+results_weighted_lasso <- na.omit(results_weighted_lasso)
+```
+
+```{r GloVe Visualize results_weighted_lasso, warning=FALSE}
+# Reshape data 
+results_long_LASSO_glove <- melt(results_weighted_lasso, id.vars = "w1", variable.name = "y_var", value.name = "value")
+# Visualize weighted LASSO weightings
+ggplot(results_long_LASSO_glove, aes(x = w1, y = value, color = y_var)) + geom_point() 
+```
+
+```{r GloVe Fit optimal LASSO weighting, warning=FALSE}
+# Fit model
+w1 = 0.8
+w2 = 1 - w1
+weights <- c()
+for (i in 1:length(y_train)) {
+  if (y_train[i] == 1) {
+    weights <- c(weights, w1)
+  } else{
+    weights <- c(weights, w2)
+  }
+}
+ # Fit model
+  glmnet.out <- glmnet(x_train,y_train,family = "binomial",alpha = 1,lambda = best_lambda,weights = weights)
+  
+# Percent reduction in deviance
+per_dev_red_weighted_Lasso <- glmnet.out$dev.ratio
+```
+
+```{r GloVe Train Metrics for Weighted LASSO, warning=FALSE}
+# Get predictions
+predict.out <- predict(glmnet.out, newx = as.matrix(training_mat[,2:151]), type = "response")
+predict.out[which(predict.out >= 0.5)] <- 1
+predict.out[which(predict.out < 0.5)] <- 0
+guess <- data.frame(predict.out)
+# Format output
+output <- cbind(guess, training_mat[,1])
+colnames(output)[2] <- "truth"
+y_true <- output$truth
+y_pred <- output$s0
+# Get metrics
+Re_weighted_LASSO_train_glove <- Recall(y_true, y_pred, positive = 1)
+Pr_weighted_LASSO_train_glove <- Precision(y_true, y_pred, positive = 1)
+F1_weighted_LASSO_train_glove <- F1_Score(y_true, y_pred, positive = 1)
+```
+
+```{r GloVe Test Metrics for Weighted LASSO, warning=FALSE}
+# Get predictions
+predict.out <- predict(glmnet.out, newx = as.matrix(testing_mat[,2:151]) ,type="response")
+predict.out[which(predict.out >= 0.5)] <- 1
+predict.out[which(predict.out < 0.5)] <- 0
+guess <- data.frame(predict.out)
+# Format output
+output <- cbind(guess, testing_mat[,1])
+colnames(output)[2] <- "truth"
+y_true <- output$truth
+y_pred <- output$s0
+# Get metrics
+Re_weighted_LASSO_test_glove <- Recall(y_true, y_pred, positive = 1)
+Pr_weighted_LASSO_test_glove <- Precision(y_true, y_pred, positive = 1)
+F1_weighted_LASSO_test_glove <- F1_Score(y_true, y_pred, positive = 1)
+```
+
+<!-------------------------------------------------------------------------------------------------------------------------------------------->
+
+<!--------------------------------------------------------------Word2Vec CODE----------------------------------------------------------------->
+```{r word2vec load and clean, warning=FALSE}
+#reading data from csv
+subreddit_data = read.csv(file="../data/NHGW.csv", header=TRUE)
+#removing punctuation
+subreddit_data$Body = removePunctuation(subreddit_data$Body, ucp=TRUE)
+#everything lowercase
+subreddit_data$Body = tolower(subreddit_data$Body)
+#remove stopwords
+subreddit_data$Body = removeWords(subreddit_data$Body, stopwords("english"))
+#strip whitespace
+subreddit_data$Body = stripWhitespace(subreddit_data$Body)
+#remove numbers
+subreddit_data$Body = removeNumbers(subreddit_data$Body)
+#stemming
+subreddit_data$Body = stemDocument(subreddit_data$Body)
+#convert encoding to ascii
+subreddit_data$Body = txt_clean_word2vec(subreddit_data$Body)
+#remove NA rows
+subreddit_data = na.omit(subreddit_data)
+#remove rows with NA encoding
+for(i in 1:nrow(subreddit_data)){
+  if(is.na(detect_str_enc(subreddit_data[i,]$Body))){
+    subreddit_data <- subreddit_data[-c(i),]
+  }
+}
+```
+
+```{r word2vec train and test, warning=FALSE}
+#setting seed so results are consistent
+set.seed(874)
+#set training ratio
+tr_ratio = 0.8
+# split into training and testing sets
+N = nrow(subreddit_data)
+n = round(N*tr_ratio)                               
+m = N-n 
+tr_ind <- sample(N, n)           
+te_ind <- setdiff(seq_len(N), tr_ind)
+```
+
+```{r word2vec initial model parameter selection, warning=FALSE}
+#create empty aic and dim vectors
+init_aic_vec = c()
+init_dim_vec = c()
+init_f1_vec = c()
+init_prec_vec = c()
+init_recall_vec = c()
+#try every dimension from 1 to 200
+for(j in 1:5){
+  for(i in 10:200){
+    #fit the word2vec model
+    model <- word2vec(x = subreddit_data[tr_ind,]$Body, type = "skip-gram", dim = i)
+    #converting word2vec model to a matrix
+    newdata = data.frame(doc_id = 1:n, text = subreddit_data[tr_ind,]$Body)
+    matrix = doc2vec(model, newdata, encoding = "ascii")
+    #create dataframe for fitting logistic regression
+    matrix = data.frame(matrix)
+    fit = na.omit(cbind(subreddit_data[tr_ind,]$Sarcastic, matrix, row.names = NULL))
+    #fit logsitic regression
+    log_reg = glm(`subreddit_data[tr_ind, ]$Sarcastic`~., family='binomial', data=fit)
+    #append values
+    init_aic_vec = append(init_aic_vec, log_reg$aic)
+    init_dim_vec = append(init_dim_vec, i)
+    
+    #calculate testing values
+    newdata_te = data.frame(doc_id = 1:m, text = subreddit_data[te_ind,]$Body)
+    matrix_te = doc2vec(model, newdata_te, encoding = "ascii")
+    testing_fit = data.frame(y=subreddit_data[te_ind,]$Sarcastic, matrix_te)
+    testing_fit = na.omit(testing_fit)
+    pred_te = predict(log_reg, newdata=testing_fit, type="response")
+    for(i in 1:length(pred_te)){
+      if(pred_te[i] > 0.5){
+        pred_te[i] = 1
+      }else{
+        pred_te[i] = 0
+      }
+    }
+    t = cbind(pred_te, testing_fit[,1])
+    t = na.omit(t)
+    predicted = t[,1]
+    truth = t[,2]
+    y_true <- truth
+    y_pred <- predicted
+    init_recall_vec = append(init_recall_vec, Recall(y_true, y_pred, positive = 1))
+    init_prec_vec = append(init_prec_vec, Precision(y_true, y_pred, positive = 1))
+    init_f1_vec = append(init_f1_vec, F1_Score(y_true, y_pred, positive = 1))
+  }
+}
+#plot results
+#plot(init_dim_vec, init_f1_vec, ylab="Testing F1 Score", xlab="Dimensions in word2vec model")
+```
+
+```{r word2vec fitting base model, warning=FALSE}
+#fit the word2Vec model
+#model <- word2vec(x = subreddit_data[tr_ind,]$Body, type = "skip-gram", dim = 140)
+#Save the model to hard disk as a binary file
+#path <- "mymodel.bin"
+#write.word2vec(model, file = path)
+#Read previous model for consistency
+model <- read.word2vec("../mymodel.bin")
+#converting word2Vec model to a matrix
+newdata = data.frame(doc_id = 1:n, text = subreddit_data[tr_ind,]$Body)
+matrix = doc2vec(model, newdata, encoding = "ascii")
+#create dataframe for fitting logistic regression
+training_fit = data.frame(y=subreddit_data[tr_ind,]$Sarcastic, matrix)
+#remove NA rows
+training_fit = na.omit(training_fit)
+#fit logsitic regression
+log_reg = glm(y~., family='binomial', data=training_fit)
+summary(log_reg)
+#calculate training metrics
+pred_tr = predict(log_reg, type = "response")
+for(i in 1:length(pred_tr)){
+  if(pred_tr[i] > 0.5){
+    pred_tr[i] = 1
+  }else{
+    pred_tr[i] = 0
+  }
+}
+t = cbind(pred_tr, training_fit[,1])
+t = na.omit(t)
+predicted = t[,1]
+truth = t[,2]
+y_true <- truth
+y_pred <- predicted
+base_tr_recall = Recall(y_true, y_pred, positive = 1)
+base_tr_precision = Precision(y_true, y_pred, positive = 1)
+base_tr_f1 = F1_Score(y_true, y_pred, positive = 1)
+#calculate testing metrics
+newdata_te = data.frame(doc_id = 1:m, text = subreddit_data[te_ind,]$Body)
+matrix_te = doc2vec(model, newdata_te, encoding = "ascii")
+testing_fit = data.frame(y=subreddit_data[te_ind,]$Sarcastic, matrix_te)
+testing_fit = na.omit(testing_fit)
+pred_te = predict(log_reg, newdata=testing_fit, type="response")
+for(i in 1:length(pred_te)){
+  if(pred_te[i] > 0.5){
+    pred_te[i] = 1
+  }else{
+    pred_te[i] = 0
+  }
+}
+t = cbind(pred_te, testing_fit[,1])
+t = na.omit(t)
+predicted = t[,1]
+truth = t[,2]
+y_true <- truth
+y_pred <- predicted
+base_te_recall = Recall(y_true, y_pred, positive = 1)
+base_te_precision = Precision(y_true, y_pred, positive = 1)
+base_te_f1 = F1_Score(y_true, y_pred, positive = 1)
+
+# base_tr_recall
+# base_tr_precision
+# base_tr_f1
+# 
+# base_te_recall
+# base_te_precision
+# base_te_f1
+```
+
+```{r word2vec base vifs, warning=FALSE}
+base_vif = vif(log_reg)
+#(base_vif > 10)
+#116 variables have VIF > 10
+```
+
+```{r word2vec pca fitting, warning=FALSE}
+pca.out <- prcomp(as.data.frame(as.matrix(training_fit[,2:ncol(training_fit)])))
+pca.out.test <- predict(pca.out, as.data.frame(as.matrix(testing_fit[,2:ncol(testing_fit)])))
+
+#first 55 pc explain 90% of the variance
+summary(pca.out)
+
+pcs <- as.data.frame(pca.out$x[,1:55])
+train_data <- cbind(y=training_fit$y,pcs)
+
+test_data <- as.data.frame(pca.out.test[,1:55])
+
+# Fit model
+glm.out.2 <- glm(y~., family = binomial, train_data)
+summary(glm.out.2)
+#calculate training metrics
+pred_tr <- predict(glm.out.2,newdata = test_data,type="response")
+for(i in 1:length(pred_tr)){
+  if(pred_tr[i] > 0.5){
+    pred_tr[i] = 1
+  }else{
+    pred_tr[i] = 0
+  }
+}
+t = cbind(pred_tr, training_fit[,1])
+t = na.omit(t)
+predicted = t[,1]
+truth = t[,2]
+y_true <- truth
+y_pred <- predicted
+pca_tr_recall = Recall(y_true, y_pred, positive = 1)
+pca_tr_precision = Precision(y_true, y_pred, positive = 1)
+pca_tr_f1 = F1_Score(y_true, y_pred, positive = 1)
+#calculate testing metrics
+pred_te = predict(glm.out.2, newdata=test_data, type="response")
+for(i in 1:length(pred_te)){
+  if(pred_te[i] > 0.5){
+    pred_te[i] = 1
+  }else{
+    pred_te[i] = 0
+  }
+}
+t = cbind(pred_te, testing_fit[,1])
+t = na.omit(t)
+predicted = t[,1]
+truth = t[,2]
+y_true <- truth
+y_pred <- predicted
+pca_te_recall = Recall(y_true, y_pred, positive = 1)
+pca_te_precision = Precision(y_true, y_pred, positive = 1)
+pca_te_f1 = F1_Score(y_true, y_pred, positive = 1)
+
+# pca_tr_recall
+# pca_tr_precision
+# pca_tr_f1
+# 
+# pca_te_recall
+# pca_te_precision
+# pca_te_f1
+```
+
+```{r word2vec pca vifs, warning=FALSE}
+pca_vif = vif(glm.out.2)
+# (pca_vif > 10)
+#none of the vifs are > 10
+```
+
+```{r word2vec lasso fitting, warning=FALSE}
+x_train = model.matrix(y~., training_fit)
+#I will use 5 fold cross validation to find the optimal lambda value
+lasso_reg <- cv.glmnet(x=x_train, y=as.matrix(training_fit[,1]), family="binomial", alpha = 1, standardize = TRUE, nfolds = 5)
+lambda_best <- lasso_reg$lambda.min 
+lasso_log_reg = glmnet(x=x_train, y=as.matrix(training_fit[,1]), family="binomial", alpha = 1, lambda = lambda_best, standardize = TRUE)
+# lasso_log_reg
+#kept 32 variables
+# lasso_log_reg$beta
+#calculate training metrics
+pred_tr = predict(lasso_log_reg, newx=x_train, type = "response")
+for(i in 1:length(pred_tr)){
+  if(pred_tr[i] > 0.5){
+    pred_tr[i] = 1
+  }else{
+    pred_tr[i] = 0
+  }
+}
+t = cbind(pred_tr, training_fit[,1])
+t = na.omit(t)
+predicted = t[,1]
+truth = t[,2]
+y_true <- truth
+y_pred <- predicted
+tr_recall_l = Recall(y_true, y_pred, positive = 1)
+tr_precision_l = Precision(y_true, y_pred, positive = 1)
+tr_f1_l = F1_Score(y_true, y_pred, positive = 1)
+  
+#calculate testing metrics
+newdata_te = data.frame(doc_id = 1:m, text = subreddit_data[te_ind,]$Body)
+matrix_te = doc2vec(model, newdata_te, encoding = "ascii")
+testing_fit = data.frame(y=subreddit_data[te_ind,]$Sarcastic, matrix_te)
+testing_fit=na.omit(testing_fit)
+x_test = model.matrix(y~., testing_fit)
+pred_te = predict(lasso_log_reg, newx=as.matrix(x_test), type="response")
+for(i in 1:length(pred_te)){
+  if(pred_te[i] > 0.5){
+    pred_te[i] = 1
+  }else{
+    pred_te[i] = 0
+  }
+}
+t = cbind(pred_te, testing_fit[,1])
+t = na.omit(t)
+predicted = t[,1]
+truth = t[,2]
+y_true <- truth
+y_pred <- predicted
+te_recall_l = Recall(y_true, y_pred, positive = 1)
+te_precision_l = Precision(y_true, y_pred, positive = 1)
+te_f1_l = F1_Score(y_true, y_pred, positive = 1)
+
+# te_precision_l
+# te_recall_l
+# te_f1_l
+# 
+# tr_precision_l
+# tr_recall_l
+# tr_f1_l
+```
+
+```{r word2vec finding weights for base model, warning=FALSE}
+#create empty w1 and metric vectors
+w1_vec = c()
+
+tr_precision_vec = c()
+tr_recall_vec = c()
+tr_f1_vec = c()
+
+te_precision_vec = c()
+te_recall_vec = c()
+te_f1_vec = c()
+
+for(i in 1:99){
+  weight_vec = c() 
+  w1 = i/100
+  w2 = 1 - w1
+  w1_vec = append(w1_vec, w1)
+  #create weights vector
+  for(k in 1:nrow(training_fit)){
+    if(training_fit[k,1] == 0){
+      weight_vec = append(weight_vec, w1)
+    }else{
+      weight_vec = append(weight_vec, w2)
+    }
+  }
+  #fit logistic regression
+  wlog_reg = glm(y~., family='binomial', data=training_fit, weights = weight_vec)
+  #calculate training metrics
+  pred_tr = predict(wlog_reg, type = "response")
+  for(k in 1:length(pred_tr)){
+    if(pred_tr[k] > 0.5){
+      pred_tr[k] = 1
+    }else{
+      pred_tr[k] = 0
+    }
+  }
+  t = cbind(pred_tr, training_fit[,1])
+  t = na.omit(t)
+  predicted = t[,1]
+  truth = t[,2]
+  y_true <- truth
+  y_pred <- predicted
+  tr_recall_vec = append(tr_recall_vec, Recall(y_true, y_pred, positive = 1))
+  tr_precision_vec = append(tr_precision_vec, Precision(y_true, y_pred, positive = 1))
+  tr_f1_vec = append(tr_f1_vec, F1_Score(y_true, y_pred, positive = 1))
+  #calculate testing metrics
+  newdata_te = data.frame(doc_id = 1:m, text = subreddit_data[te_ind,]$Body)
+  matrix_te = doc2vec(model, newdata_te, encoding = "ascii")
+  testing_fit = data.frame(y=subreddit_data[te_ind,]$Sarcastic, matrix_te)
+  testing_fit=na.omit(testing_fit)
+  pred_te = predict(wlog_reg, newdata=testing_fit, type="response")
+  for(k in 1:length(pred_te)){
+    if(pred_te[k] > 0.5){
+      pred_te[k] = 1
+    }else{
+      pred_te[k] = 0
+    }
+  }
+  t = cbind(pred_te, testing_fit[,1])
+  t = na.omit(t)
+  predicted = t[,1]
+  truth = t[,2]
+  y_true <- truth
+  y_pred <- predicted
+  te_recall_vec = append(te_recall_vec, Recall(y_true, y_pred, positive = 1))
+  te_precision_vec = append(te_precision_vec, Precision(y_true, y_pred, positive = 1))
+  te_f1_vec = append(te_f1_vec, F1_Score(y_true, y_pred, positive = 1))
+}
+results_base_weighted <-
+  data.frame(Re = NA,
+             Pr = NA,
+             F1 = NA,
+             w1 = NA)
+results_base_weighted <-
+    rbind(results_base_weighted, data.frame(
+      Re = te_recall_vec,
+      Pr = te_precision_vec,
+      F1 = te_f1_vec,
+      w1 = w1_vec
+    ))
+
+# Reshape data 
+results_long <- melt(results_base_weighted, id.vars = "w1", variable.name = "y_var", value.name = "value")
+
+# Visualize
+# ggplot(results_long, aes(x = w1, y = value, color = y_var)) +
+# geom_point()
+```
+
+```{r word2vec fitting base weighted model and predicting, warning=FALSE}
+weight_vec = c()
+w1 = 0.41
+w2 = 1-w1
+#create weights vector
+for(i in 1:nrow(training_fit)){
+  if(training_fit[i,1] == 0){
+    weight_vec = append(weight_vec, w1)
+  }else{
+    weight_vec = append(weight_vec, w2)
+  }
+}
+#fit logistic regression
+log_reg_w = glm(y~., family='binomial', data=training_fit, weights = weight_vec)
+summary(log_reg_w)
+#calculate training metrics
+pred_tr = predict(log_reg_w, type = "response")
+for(i in 1:length(pred_tr)){
+  if(pred_tr[i] > 0.5){
+    pred_tr[i] = 1
+  }else{
+    pred_tr[i] = 0
+  }
+}
+t = cbind(pred_tr, training_fit[,1])
+t = na.omit(t)
+predicted = t[,1]
+truth = t[,2]
+y_true <- truth
+y_pred <- predicted
+tr_recall_w = Recall(y_true, y_pred, positive = 1)
+tr_precision_w = Precision(y_true, y_pred, positive = 1)
+tr_f1_w = F1_Score(y_true, y_pred, positive = 1)
+
+#calculate testing metrics
+newdata_te = data.frame(doc_id = 1:m, text = subreddit_data[te_ind,]$Body)
+matrix_te = doc2vec(model, newdata_te, encoding = "ascii")
+testing_fit = data.frame(y=subreddit_data[te_ind,]$Sarcastic, matrix_te)
+testing_fit=na.omit(testing_fit)
+pred_te = predict(log_reg_w, newdata=testing_fit, type="response")
+for(i in 1:length(pred_te)){
+  if(pred_te[i] > 0.5){
+    pred_te[i] = 1
+  }else{
+    pred_te[i] = 0
+  }
+}
+t = cbind(pred_te, testing_fit[,1])
+t = na.omit(t)
+predicted = t[,1]
+truth = t[,2]
+ y_true <- truth
+y_pred <- predicted
+te_recall_w = Recall(y_true, y_pred, positive = 1)
+te_precision_w = Precision(y_true, y_pred, positive = 1)
+te_f1_w = F1_Score(y_true, y_pred, positive = 1)
+
+# tr_recall_w
+# tr_precision_w
+# tr_f1_w
+# 
+# te_recall_w
+# te_precision_w
+# te_f1_w
+```
+
+```{r word2vec weighted base model VIFs, warning=FALSE}
+w_vif = vif(log_reg_w)
+# (w_vif > 10)
+#116 variables vif > 10
+```
+
+```{r word2vec finding weights for pca model, warning=FALSE}
+#create empty w1 and metric vectors
+w1_vecp = c()
+
+tr_precision_vecp = c()
+tr_recall_vecp = c()
+tr_specificity_vecp = c()
+tr_f1_vecp = c()
+
+te_precision_vecp = c()
+te_recall_vecp = c()
+te_specificity_vecp = c()
+te_f1_vecp = c()
+
+
+for(i in 1:99){
+  weight_vec = c() 
+  w1 = i/100
+  w2 = 1-w1
+  w1_vecp = append(w1_vecp, w1)
+  #create weights vector
+  for(k in 1:nrow(training_fit)){
+    if(training_fit[k,1] == 0){
+      weight_vec = append(weight_vec, w1)
+    }else{
+      weight_vec = append(weight_vec, w2)
+    }
+  }
+  #fit logistic regression
+  glm.out.w2 <- glm(y~., family = binomial, train_data, weights=weight_vec)
+  #calculate training metrics
+  pred_tr = predict(glm.out.w2, type = "response")
+  for(k in 1:length(pred_tr)){
+    if(pred_tr[k] > 0.5){
+      pred_tr[k] = 1
+    }else{
+      pred_tr[k] = 0
+    }
+  }
+  t = cbind(pred_tr, training_fit[,1])
+  t = na.omit(t)
+  predicted = t[,1]
+  truth = t[,2]
+  y_true <- truth
+  y_pred <- predicted
+  tr_recall_vecp = append(tr_recall_vecp, Recall(y_true, y_pred, positive = 1))
+  tr_precision_vecp = append(tr_precision_vecp, Precision(y_true, y_pred, positive = 1))
+  tr_f1_vecp = append(tr_f1_vecp, F1_Score(y_true, y_pred, positive = 1))
+  #calculate testing metrics
+  pred_te = predict(glm.out.w2, newdata=test_data, type="response")
+  for(k in 1:length(pred_te)){
+    if(pred_te[k] > 0.5){
+      pred_te[k] = 1
+    }else{
+      pred_te[k] = 0
+    }
+  }
+  t = cbind(pred_te, testing_fit[,1])
+  t = na.omit(t)
+  predicted = t[,1]
+  truth = t[,2]
+   y_true <- truth
+  y_pred <- predicted
+  te_recall_vecp = append(te_recall_vecp, Recall(y_true, y_pred, positive = 1))
+  te_precision_vecp = append(te_precision_vecp, Precision(y_true, y_pred, positive = 1))
+  te_f1_vecp = append(te_f1_vecp, F1_Score(y_true, y_pred, positive = 1))
+}
+
+results_pca_weighted <-
+  data.frame(Re = NA,
+             Pr = NA,
+             F1 = NA,
+             w1 = NA)
+results_pca_weighted <-
+    rbind(results_pca_weighted, data.frame(
+      Re = te_recall_vecp,
+      Pr = te_precision_vecp,
+      F1 = te_f1_vecp,
+      w1 = w1_vecp
+    ))
+
+# Reshape data 
+results_long_pca <- melt(results_pca_weighted, id.vars = "w1", variable.name = "y_var", value.name = "value")
+
+# Visualize
+ggplot(results_long_pca, aes(x = w1, y = value, color = y_var)) +
+geom_point()
+```
+
+```{r word2vec fitting weighted pca model, warning=FALSE}
+#create weight vector
+weight_vec = c() 
+w1 = 0.28
+w2 = 1-w1
+w1_vecp = append(w1_vecp, w1)
+#create weights vector
+for(i in 1:nrow(training_fit)){
+  if(training_fit[i,1] == 0){
+    weight_vec = append(weight_vec, w1)
+  }else{
+    weight_vec = append(weight_vec, w2)
+  }
+}
+
+# Fit model
+glm.out.3 <- glm(y~., family = binomial, train_data, weights = weight_vec)
+summary(glm.out.3)
+pred_tr <- predict(glm.out.3, newdata = test_data, type="response")
+
+for(i in 1:length(pred_tr)){
+  if(pred_tr[i] > 0.5){
+    pred_tr[i] = 1
+  }else{
+    pred_tr[i] = 0
+  }
+}
+t = cbind(pred_tr, training_fit[,1])
+t = na.omit(t)
+predicted = t[,1]
+truth = t[,2]
+y_true <- truth
+y_pred <- predicted
+pca_w_tr_recall = Recall(y_true, y_pred, positive = 1)
+pca_w_tr_precision = Precision(y_true, y_pred, positive = 1)
+pca_w_tr_f1 = F1_Score(y_true, y_pred, positive = 1)
+#calculate testing metrics
+pred_te = predict(glm.out.3, newdata=test_data, type="response")
+for(i in 1:length(pred_te)){
+  if(pred_te[i] > 0.5){
+    pred_te[i] = 1
+  }else{
+    pred_te[i] = 0
+  }
+}
+t = cbind(pred_te, testing_fit[,1])
+t = na.omit(t)
+predicted = t[,1]
+truth = t[,2]
+y_true <- truth
+y_pred <- predicted
+pca_w_te_recall = Recall(y_true, y_pred, positive = 1)
+pca_w_te_precision = Precision(y_true, y_pred, positive = 1)
+pca_w_te_f1 = F1_Score(y_true, y_pred, positive = 1)
+
+# pca_w_tr_recall
+# pca_w_tr_precision
+# pca_w_tr_f1
+# 
+# pca_w_te_recall
+# pca_w_te_precision
+# pca_w_te_f1
+```
+
+```{r word2vec weighted pca vifs, warning=FALSE}
+pw_vif = vif(glm.out.3)
+# (pw_vif > 10)
+#no variables have vif > 10
+```
+
+```{r word2vec finding weights for LASSO model, warning=FALSE}
+#create empty w1 and metric vectors
+w1_vecl = c()
+tr_precision_vecl = c()
+tr_recall_vecl = c()
+tr_f1_vecl = c()
+te_precision_vecl = c()
+te_recall_vecl = c()
+te_f1_vecl = c()
+
+for(i in 1:99){
+  weight_vec = c() 
+  w1 = i/100
+  w2 = 1-w1
+  w1_vecl = append(w1_vecl, w1)
+  #create weights vector
+  for(k in 1:nrow(training_fit)){
+    if(training_fit[k,1] == 0){
+      weight_vec = append(weight_vec, w1)
+    }else{
+      weight_vec = append(weight_vec, w2)
+    }
+  }
+  #fit logistic regression
+  lasso_log_reg2 = glmnet(x_train, y=as.matrix(training_fit[,1]), family="binomial", alpha = 1, lambda = lambda_best, standardize = TRUE, weights=weight_vec)
+  #calculate training metrics
+  pred_tr = predict(lasso_log_reg2, newx=x_train, type = "response")
+  for(k in 1:length(pred_tr)){
+    if(pred_tr[k] > 0.5){
+      pred_tr[k] = 1
+    }else{
+      pred_tr[k] = 0
+    }
+  }
+  t = cbind(pred_tr, training_fit[,1])
+  t = na.omit(t)
+  predicted = t[,1]
+  truth = t[,2]
+  y_true <- truth
+  y_pred <- predicted
+  tr_recall_vecl = append(tr_recall_vecl, Recall(y_true, y_pred, positive = 1))
+  tr_precision_vecl = append(tr_precision_vecl, Precision(y_true, y_pred, positive = 1))
+  tr_f1_vecl = append(tr_f1_vecl, F1_Score(y_true, y_pred, positive = 1))
+  #calculate testing metrics
+  pred_te = predict(lasso_log_reg2, newx=as.matrix(x_test), type="response")
+  for(k in 1:length(pred_te)){
+    if(pred_te[k] > 0.5){
+      pred_te[k] = 1
+    }else{
+      pred_te[k] = 0
+    }
+  }
+  t = cbind(pred_te, testing_fit[,1])
+  t = na.omit(t)
+  predicted = t[,1]
+  truth = t[,2]
+   y_true <- truth
+  y_pred <- predicted
+  te_recall_vecl = append(te_recall_vecl, Recall(y_true, y_pred, positive = 1))
+  te_precision_vecl = append(te_precision_vecl, Precision(y_true, y_pred, positive = 1))
+  te_f1_vecl = append(te_f1_vecl, F1_Score(y_true, y_pred, positive = 1))
+}
+
+results_lasso_weighted <-
+  data.frame(Re = NA,
+             Pr = NA,
+             F1 = NA,
+             w1 = NA)
+results_lasso_weighted <-
+    rbind(results_lasso_weighted, data.frame(
+      Re = te_recall_vecl,
+      Pr = te_precision_vecl,
+      F1 = te_f1_vecl,
+      w1 = w1_vecl
+    ))
+
+# Reshape data 
+results_long_lasso <- melt(results_lasso_weighted, id.vars = "w1", variable.name = "y_var", value.name = "value")
+
+# Visualize
+ggplot(results_long_lasso, aes(x = w1, y = value, color = y_var)) +
+geom_point()
+```
+
+```{r word2vec weighted lasso prediction, warning=FALSE}
+weight_vec = c() 
+w1 = 0.51
+w2 = 1-w1
+#create weights vector
+for(i in 1:nrow(training_fit)){
+  if(training_fit[i,1] == 0){
+    weight_vec = append(weight_vec, w1)
+  }else{
+    weight_vec = append(weight_vec, w2)
+  }
+}
+#fit logistic regression
+lasso_log_reg3 = glmnet(x_train, y=as.matrix(training_fit[,1]), family="binomial", alpha = 1, lambda = lambda_best, standardize = TRUE, weights=weight_vec)
+lasso_log_reg3
+
+#calculate training metrics
+pred_tr = predict(lasso_log_reg3, newx=x_train, type = "response")
+for(i in 1:length(pred_tr)){
+  if(pred_tr[i] > 0.5){
+    pred_tr[i] = 1
+  }else{
+    pred_tr[i] = 0
+  }
+}
+t = cbind(pred_tr, training_fit[,1])
+t = na.omit(t)
+predicted = t[,1]
+truth = t[,2]
+y_true <- truth
+y_pred <- predicted
+l_w_tr_recall = Recall(y_true, y_pred, positive = 1)
+l_w_tr_precision = Precision(y_true, y_pred, positive = 1)
+l_w_tr_f1 = F1_Score(y_true, y_pred, positive = 1)
+#calculate testing metrics
+newdata_te = data.frame(doc_id = 1:m, text = subreddit_data[te_ind,]$Body)
+matrix_te = doc2vec(model, newdata_te, encoding = "ascii")
+testing_fit = data.frame(y=subreddit_data[te_ind,]$Sarcastic, matrix_te)
+testing_fit=na.omit(testing_fit)
+x_test = model.matrix(y~., testing_fit)
+pred_te = predict(lasso_log_reg, newx=as.matrix(x_test), type="response")
+for(i in 1:length(pred_te)){
+  if(pred_te[i] > 0.5){
+    pred_te[i] = 1
+  }else{
+    pred_te[i] = 0
+  }
+}
+t = cbind(pred_te, testing_fit[,1])
+t = na.omit(t)
+predicted = t[,1]
+truth = t[,2]
+y_true <- truth
+y_pred <- predicted
+l_w_te_recall = Recall(y_true, y_pred, positive = 1)
+l_w_te_precision = Precision(y_true, y_pred, positive = 1)
+l_w_te_f1 = F1_Score(y_true, y_pred, positive = 1)
+
+# l_w_tr_recall
+# l_w_tr_precision
+# l_w_tr_f1
+# 
+# l_w_te_recall
+# l_w_te_precision
+# l_w_te_f1
+```
+<!-------------------------------------------------------------------------------------------------------------------------------------------->
 
 # Introduction
 
@@ -894,7 +2302,7 @@ For our analysis a true positive is a correctly predicting a comment is sarcasti
 
 # Regression Analysis
 
-This analysis is a comparison of logistic regression model performance when using 3 types of feature extraction. For each feature extraction we fit a base model. We then perform Princial Componenet Analysis (PCA) to reduced dimensionality and deal with multicollinearity. Finally we investigate LASSO models a means for dimensionality reduction. 
+This analysis is a comparison of logistic regression model performance when using 3 types of feature extraction. For each feature extraction we fit a base model. We then perform Principal Componenet Analysis (PCA) to reduced dimensionality and deal with multicollinearity. Finally we investigate LASSO models a means for dimensionality reduction. 
 
 After model fitting we perform weighting on all 3 model types and decide a best model for each feature extraction method. Weighting in done by multiply each predictor by $w$, where $w \in (0,1)$, if a comment is sarcastic and by $1-w$ if a comment is not sarcastic. This is done for every $w$ starting from $0.01$ to $0.99$ in increments of $0.01$. We record testing and training metrics foe each model and discuss our optimal selection.
 
@@ -902,9 +2310,26 @@ We hypothesis that models using GloVe as the feature extraction method will perf
  
 ## Variable Selection
 
-figuring out dimeniosnality
-
 ### TF-IDF 
+
+After performing text preprocessing and TFIDF calculations the resulting DTM was $642 \times 2074$. This matrix has far too many columns compared to rows and so some dimensionality reduction was required. One way to do so is to filter away unimportant terms. This can be decided by the percentiles of the TF-IDFs. For a given percentile we can exclude columns of the DTM based on whether or not their values fall within that percentile. We do this in increments of 5 from the 5th percentile to the 95th percentile, fit a model, and recording the corresponding AIC. We opt to keep the DTM that produced the model with the lowest AIC.
+
+```{r plot aics,fig.height = 3, fig.width = 5,fig.align='center',message=FALSE}
+# models_aic
+aic_df <-
+  data.frame(quants = names(quants), aic = unlist(models_aic))
+
+ggplot(aic_df, aes(x = aic, y = quants)) +
+  geom_segment(aes(
+    x = 0,
+    y = quants,
+    xend = aic,
+    yend = quants
+  )) + ggtitle("TFIDF Quantile by AIC") +
+  xlab("AIC") + ylab("TFIDF Quantiles") + theme(plot.title = element_text(hjust = 0.5)) +
+  geom_point()
+```
+The model corresponding to the lowest AIC had a DTM filtered to disclude TFIDF values below the 95th percentile resulting in a $512 \times 74$ matrix.
 
 ### Word2Vec 
 
@@ -922,81 +2347,24 @@ discuss LASSO as another option instead of PCA
 
 ### TF-IDF 
 
-### Word2Vec 
+For the base model we take the minimum AIC model found during variable selection. This result model has a 14% reduction in deviance and an AIC of 734. R fails to estimate several predictor coefficients and outputs them of NA. This suggests investigation of multicollinearity is needed. After examining the model's VIFs and the correlation between predictors it is was found that 6 variables have VIfs that are over 10 and several predictors are perfectly correlated. To deal with multicollinearity PCA and LASSO are explored.
 
-### GloVe 
+For PCA we kept a cumulative proportion of up to 90% which resulted in using 24 principal components. Fitting our model to the data the AIC was 17135 and the deviance increase by a factor of 24. Clearly the model does not fit the data well. However, no VIFs were found to be over 10 so the multicollinearity was removed.
 
+Next we employed cross validation to fit a LASSO model. An optimal $\lambda$ of 0.025 was selected and the resulting model produced a 34.55% reduction in deviance.
 
-## Other Findings
+We know move onto optimal weight selection. We seek to achieve the best balance of Precision, Recall, and F1 Score.
 
-literaty anyhting interesting could be nothing
-
-### TF-IDF 
-
-### Word2Vec 
-
-### GloVe 
-
-# Conclusion
-
-## Model Comparison
-
-of all methods which had the best balance of metrics
-
-## Limitations
-
-discainer about data set and stocahstic nature of Glove and Word2Vec
-
-## Final Remarks
-
-Summary of everything
-
-# References
-
-<!-- ##########################################################################################################################-->
-
-##### Base model
-
-The initial DTM after text processing was $642 \times 2074$. This matrix has far too many columns compared to rows and so some dimensionality reduction was required. One way to do so is to filter away unimportant terms. This can be decided by the quantiles of the TF-IDF. We can exclude any columns of the DTM based on whether or not their values fall within a certain percentile. If we do this for all percentile between 1 to 100 in steps of 5 we can record the AIC and choose the best subsetted model.
-
-
-```{r plot aics}
-# models_aic
-aic_df <- data.frame(quants = names(quants), aic = unlist(models_aic))
-
-ggplot(aic_df, aes(x = aic, y = quants)) +
-        geom_segment(aes(x = 0, y = quants, xend = aic, yend = quants)) +
-        geom_point()
-```
-
-
-The minimum AIC found was 734 for a model not including any terms who had TF-IDF values below the 95th percentile. This resulted in a 14% reduction in deviance. Thew new dimensions of the DTM were $512 \times 74$.
-##### PCA model
-
-In an attempted to get around the multicollinearity in the model PCA was utilized on the filtered DTM. 90th cumulative proportion was kept. This resulted in an AIC of 17135 and actually increased the null deviance by a factor of 24 as opposed to reducing it.
-
-##### LASSO model
-
-corss validation was sued to fit a LASSO with a best lambda of  0.02539292. List of signifigant words was: tate,written, gold, final, companionship, realis, reduct, asexu, remov, sister, page, pictur, puberti, gal, act, crime, cop, polic, pedo, jail, report, dump, broke, depend, nowaday, iron, ignor
-
-null deviance reduction: 0.3455114
-null deviance of 710.8395
-
-#### Weightings
-
-Weightings for each model were chosen as follows:
-
-```{r plot weightings}
-
-
+```{r plot weightings,fig.height = 6, fig.width = 10,fig.align='center'}
 library(gridExtra)
 grid.arrange(results_base_weighted_p, results_PCA_weighted_p, results_weighted_lasso_p,ncol = 2)
 ```
 
+Examining the above graphs the best weightings are 0.75 for the base model, 0.62 for the PCA modek, and 0.55 for the LASSO model.
 
-### TF-IDF Evaluation
+With model selection finished we may now compare all models and pick the best TFIDF model.
 
-```{r metrics plotted for tf-idf, echo=FALSE, results='asis'}
+```{r metrics plotted for tf-idf,fig.height = 6, fig.width = 10,fig.align='center'}
 library(knitr)
 tests <-
   data.frame(
@@ -1060,6 +2428,102 @@ tests <-
     
   )
 # kable(tests)
+tests$test <- factor(tests$test)
+levels(tests$test)[1] <- "Train"
+levels(tests$test)[2] <- "Test"
+colnames(tests)[4] <- "Split"
+
+
+p_recall <- ggplot(tests, aes(x = rownames(tests),y =Recall, fill=Split)) +
+geom_bar(stat="identity", color="black", position=position_dodge())+
+  theme_minimal() + coord_flip() +scale_fill_manual(values=c('#999999','#E69F00')) + ggtitle("Train/Test Models by Recall") +
+   xlab("Model") + theme(plot.title = element_text(hjust = 0.5))
+
+p_pres <- ggplot(tests, aes(x = rownames(tests),y =Precision, fill=Split)) +
+geom_bar(stat="identity", color="black", position=position_dodge())+
+  theme_minimal() + coord_flip() +scale_fill_manual(values=c('#999999','#E69F00'))+ ggtitle("Train/Test Models by Precision") +
+   xlab("Model") + theme(plot.title = element_text(hjust = 0.5))
+
+
+ p_f1 <- ggplot(tests, aes(x = rownames(tests),y =F1_Score, fill=Split)) +
+geom_bar(stat="identity", color="black", position=position_dodge())+
+  theme_minimal() + coord_flip() +scale_fill_manual(values=c('#999999','#E69F00'))+ ggtitle("Train/Test Models by F1 Score") +
+   xlab("Model") + theme(plot.title = element_text(hjust = 0.5))
+
+
+library(gridExtra)
+grid.arrange(p_recall, p_pres, p_f1,ncol = 2)
+```
+
+Weighted LASSO is the superior model. While it has lower Recall than Weighted PCA and Base, it does the best in F1 Score which indicates it is the most balanced model. Both Weighted PCA and Weighted base have a poor Precision and F1 Scores
+
+### Word2Vec 
+
+### GloVe 
+```{r metrics plotted for glove, echo=FALSE, results='asis'}
+library(knitr)
+tests <-
+  data.frame(
+    Recall = c(
+      Re_base_train_glove,
+      Re_base_test_glove,
+      Re_PCA_train_glove,
+      Re_PCA_test_glove,
+      Re_LASSO_train_glove,
+      Re_LASSO_test_glove,
+      Re_weighted_base_train_glove,
+      Re_weighted_base_test_glove,
+      Re_weighted_PCA_train_glove,
+      Re_weighted_PCA_test_glove,
+      Re_weighted_LASSO_train_glove,
+      Re_weighted_LASSO_test_glove
+    ),
+    Precision = c(
+      Pr_base_train_glove,
+      Pr_base_test_glove,
+      Pr_PCA_train_glove,
+      Pr_PCA_test_glove,
+      Pr_LASSO_train_glove,
+      Pr_LASSO_test_glove,
+      Pr_weighted_base_train_glove,
+      Pr_weighted_base_test_glove,
+      Pr_weighted_PCA_train_glove,
+      Pr_weighted_PCA_test_glove,
+      Pr_weighted_LASSO_train_glove,
+      Pr_weighted_LASSO_test_glove
+    ),
+    F1_Score = c(
+      F1_base_train_glove,
+      F1_base_test_glove,
+      F1_PCA_train_glove,
+      F1_PCA_test_glove,
+      F1_LASSO_train_glove,
+      F1_LASSO_test_glove,
+      F1_weighted_base_train_glove,
+      F1_weighted_base_test_glove,
+      F1_weighted_PCA_train_glove,
+      F1_weighted_PCA_test_glove,
+      F1_weighted_LASSO_train_glove,
+      F1_weighted_LASSO_test_glove
+    ),
+    test = c(0,1,0,1,0,1,0,1,0,1,0,1),
+    row.names = c(
+      "Train Base",
+      "Test Base",
+      "Train PCA",
+      "Test PCA",
+      "Train LASSO",
+      "Test LASSO",
+      "Train Weighted Base",
+      "Test Weighted Base",
+      "Train Weighted PCA",
+      "Test Weighted PCA",
+      "Train Weighted Lasso",
+      "Test Weighted Lasso"
+    )
+    
+  )
+# kable(tests)
 
 p_recall <- ggplot(tests, aes(x = rownames(tests),y =Recall, fill=factor(test))) +
 geom_bar(stat="identity", color="black", position=position_dodge())+
@@ -1077,65 +2541,63 @@ library(gridExtra)
 grid.arrange(p_recall, p_pres, p_f1,ncol = 2)
 
 
+
+#plot dimesionality results
+plot(dim_vec_glove, f1_vec_glove, ylab="F1 Score", xlab="Dimensions in word2vec model")
+
+# Visualize weighted base weightings
+ggplot(results_long_base_glove, aes(x = w1, y = value, color = y_var)) + geom_point()
+
+# Visualize weighted PCA weightings
+ggplot(results_long_PCA_glove, aes(x = w1, y = value, color = y_var)) + geom_point()
+
+# Visualize weighted LASSO weightings
+ggplot(results_long_LASSO_glove, aes(x = w1, y = value, color = y_var)) + geom_point()
 ```
 
+## Other Findings
 
-## Diagnostics
+### TF-IDF 
 
-### TF-IDF Diagnostics
-
-#### Base
-
-Serious multicollinearity issues. Many eastimates are NA. 6 VIFs were found to be over 10 indicating serious multicollinearity in the model and several of the coefficients for temrs in in the model were unable to be estiamted and assigned a NA
-
-```{r}
-cormat <- round(cor(basemodelforcormap[,-1]),2)
-library(reshape2)
-melted_cormat <- melt(cormat)
-ggplot(data = melted_cormat, aes(x=Var1, y=Var2, fill=value)) + 
-  geom_tile()+
-  theme(axis.text.x=element_blank(), #remove x axis labels
-        axis.ticks.x=element_blank(), #remove x axis ticks
-        axis.text.y=element_blank(),  #remove y axis labels
-        axis.ticks.y=element_blank()  #remove y axis ticks
-        )
-
-# plot(glm.out)
-
-```
+As weighted LASSO was found to be the best TF-IDF model we have access to the set of words that were not shrunk to 0. This provides us we insight as to which words predict best for sarcasm in the subreddit NHGW. The words are:
 
 
-#### PCA
+|       |         |               |       |        |
+| ----  | ------- | ------------- | ----- | ------ |
+| tate  | written | companionship |reduct | final  |
+| remov | report  |   nowaday     | gold  | realis |
+| asexu | sister  |    dump       | iron  | page   |
+| pictur| puberti |     gal       | act   |broke   |
+| ignor | crime   | cop            |polic | pedo   | 
+|jail |depend|
 
-PCA removed all collinearity no vifs. However deviance increased. This indicates potential information loss fr
+The results are quite interesting. NHGW is a subreddit about making fun of those who seemingly unaware of why women act the way they do and we see terms related to sexuality, relationships, and crime. Notably we also see *tate* a highly controversial figure for his views on women.
 
-```{r}
-# pca.out
-# 
-# cormat <- round(cor(pca.out),2)
-# library(reshape2)
-# melted_cormat <- melt(cormat)
-# ggplot(data = melted_cormat, aes(x=Var1, y=Var2, fill=value)) + 
-#   geom_tile()+
-#   theme(axis.text.x=element_blank(), #remove x axis labels
-#         axis.ticks.x=element_blank(), #remove x axis ticks
-#         axis.text.y=element_blank(),  #remove y axis labels
-#         axis.ticks.y=element_blank()  #remove y axis ticks
-#         )
-```
+### Word2Vec 
 
+### GloVe 
 
-#### LASSO
+# Conclusion
 
+## Model Comparison
 
+of all methods which had the best balance of metrics
 
-#### Base Model
+## Limitations
 
+The largest issue with this analysis is the dataset. Logistic regression is not equipped to handle such 0 heavy data and without us artifically cosntructing the ratio of sarcastic to nonsarc comments this analysis likely would not work.
 
 
-#### PCA model
+discainer about data set and stocahstic nature of Glove and Word2Vec
 
-#### LASSO model
+## Final Remarks
+
+Summary of everything
+
+# References
+
+<!-- ##########################################################################################################################-->
+
 
 
 
